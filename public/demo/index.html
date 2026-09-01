@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UIプレビュー | 社内勤怠管理</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    .demo-banner{background:#fff3cd;color:#684f00;text-align:center;padding:7px 12px;font-size:.84rem;border-bottom:1px solid #ead796}.demo-page{display:none}.demo-page.active{display:block}.demo-nav button{border:0;background:transparent;color:#dcebe7;padding:0;font-size:.94rem;font-weight:400}.demo-nav button:hover,.demo-nav button.active{color:#fff;text-decoration:underline;text-underline-offset:7px}.profile-chip{display:flex;align-items:center;gap:10px}.avatar{width:36px;height:36px;border-radius:50%;background:#d7eee7;color:#165c4c;display:grid;place-items:center;font-weight:800}.calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.calendar span{min-height:62px;border:1px solid var(--line);border-radius:8px;padding:6px;font-size:.8rem;background:#fff}.calendar .leave-day{background:#e6f4ef;border-color:#8bc3b1}.calendar .holiday{color:#ad4545;background:#fff8f8}.demo-toast{position:fixed;right:20px;bottom:20px;background:#123d35;color:#fff;padding:12px 18px;border-radius:9px;box-shadow:var(--shadow);display:none;z-index:20}.demo-toast.show{display:block}.login-wrap{min-height:calc(100vh - 150px);display:grid;place-items:center}.login-brand{text-align:center;margin-bottom:22px}.login-mark{width:58px;height:58px;border-radius:16px;background:#176b5b;color:#fff;display:grid;place-items:center;margin:0 auto 12px;font-size:1.5rem;font-weight:800}.demo-login-note{background:#edf7f4;color:#315c52;border-radius:8px;padding:9px 12px;font-size:.82rem}.login-hidden{display:none!important}@media(max-width:760px){.demo-nav button{width:100%;text-align:left;padding:9px 0}.profile-chip{display:none}.calendar span{min-height:44px}}
+  </style>
+</head>
+<body>
+<div class="demo-banner">画面確認用デモです。表示データはサンプルで、保存されません。</div>
+<header id="app-header" class="topbar login-hidden">
+  <a class="brand" href="#" data-page="home"><span class="brand-mark">勤</span><span>社内勤怠管理</span></a>
+  <button class="nav-toggle" type="button" aria-label="メニュー" onclick="document.querySelector('.nav').classList.toggle('open')">☰</button>
+  <nav class="nav demo-nav">
+    <button data-page="home" class="active">ホーム</button>
+    <button data-page="leave">有給</button>
+    <button data-page="attendance">出退勤</button>
+    <button data-page="notice">勤怠連絡</button>
+    <button data-page="admin">管理</button>
+    <button data-page="login">ログアウト</button>
+  </nav>
+  <div class="profile-chip"><div class="avatar">平</div><span>平田 太郎</span></div>
+</header>
+
+<main class="container">
+  <section id="page-login" class="demo-page active">
+    <div class="login-wrap"><section class="auth-card plain-login">
+      <div class="login-form-side"><span class="login-app-name"><span class="brand-mark">勤</span> 社内勤怠管理</span><h1>おかえりなさい</h1><p class="muted">会社のアカウントでログイン</p>
+        <form id="demo-login-form"><label>メールアドレス<input type="email" value="hirata@example.co.jp" autocomplete="username" required autofocus></label><label>パスワード<input type="password" value="demopassword" autocomplete="current-password" required></label><button class="primary wide">ログイン</button></form>
+        <p><a href="#" class="demo-action">パスワードを忘れた方</a></p><p class="demo-login-note">デモ用の入力値です。そのままログインできます。</p>
+      </div>
+    </section></div>
+  </section>
+
+  <section id="page-home" class="demo-page">
+    <div class="page-head welcome-head"><div class="welcome-copy"><p class="eyebrow">TODAY'S WORK</p><h1>平田 太郎さん</h1><p class="muted">今日も自分のペースでいきましょう。</p></div><span id="home-status" class="status">退勤中</span></div>
+    <section class="summary-grid">
+      <article class="metric"><span>現在の残有給数</span><strong>12.5<small>日</small></strong><div class="balance-detail"><span>前年繰越 <b>3.5日</b></span><span>今年付与 <b>9.0日</b></span></div></article>
+      <article class="metric"><span>登録済みの取得予定</span><strong>1.5<small>日</small></strong></article>
+      <article class="metric accent"><span>予定反映後の残数</span><strong>11.0<small>日</small></strong><div class="balance-detail"><span>前年繰越 <b>3.5日</b></span><span>今年付与 <b>7.5日</b></span></div></article>
+    </section>
+    <section class="quick-actions"><button id="home-clock" class="primary big">出勤する</button><button class="button big" data-page="leave">有給予定を登録</button><button class="button big" data-page="notice">勤怠連絡を登録</button></section>
+    <div class="two-col">
+      <section class="panel"><div class="section-head"><h2>直近の有給予定</h2><button class="button small" data-page="leave">すべて見る</button></div><ul class="item-list"><li><strong>2026-09-18</strong><span>1日</span></li><li><strong>2026-10-02</strong><span>午前休</span></li></ul></section>
+      <section class="panel"><div class="section-head"><h2>直近の勤怠連絡</h2><button class="button small" data-page="notice">すべて見る</button></div><ul class="item-list"><li><strong>2026-08-28</strong><span>遅刻</span></li><li><strong>2026-08-14</strong><span>健康診断</span></li></ul></section>
+    </div>
+  </section>
+
+  <section id="page-leave" class="demo-page">
+    <div class="page-head"><div><h1>有給管理</h1><p class="muted">残数確認、予定登録、取消ができます。</p></div></div>
+    <section class="summary-grid compact"><article class="metric"><span>現在残数</span><strong>12.5<small>日</small></strong><div class="balance-detail"><span>前年繰越 <b>3.5日</b></span><span>今年付与 <b>9.0日</b></span></div></article><article class="metric"><span>取得予定</span><strong>1.5<small>日</small></strong></article><article class="metric accent"><span>予定反映後</span><strong>11.0<small>日</small></strong><div class="balance-detail"><span>前年繰越 <b>3.5日</b></span><span>今年付与 <b>7.5日</b></span></div></article></section>
+    <p class="balance-rule">有給は今年付与分から先に消化します。未使用分の繰越は翌年末まで有効です。</p>
+    <div class="two-col form-first">
+      <section class="panel"><h2>有給予定を登録</h2><p class="notice">マネージャーまたは上長への事前確認後に登録してください。この登録による承認処理はありません。</p><form class="demo-form"><label>取得日<input type="date" value="2026-09-25" required></label><label>取得区分<select><option>1日（1.0日）</option><option>午前休（0.5日）</option><option>午後休（0.5日）</option></select></label><label>事前確認相手<input value="営業部長"></label><label>連絡事項<textarea rows="3">案件の引継ぎは共有済みです。</textarea></label><button class="primary">登録する</button></form></section>
+      <section class="panel"><h2>取得履歴・取消履歴</h2><div class="table-wrap"><table><thead><tr><th>取得日</th><th>区分</th><th>状態</th><th>操作</th></tr></thead><tbody><tr><td>2026-10-02</td><td>午前休</td><td><span class="tag">登録済み</span></td><td><button class="danger small demo-action">取消</button></td></tr><tr><td>2026-09-18</td><td>1日</td><td><span class="tag">登録済み</span></td><td><button class="danger small demo-action">取消</button></td></tr><tr><td>2026-08-12</td><td>1日</td><td><span class="tag">取得済み</span></td><td>—</td></tr><tr><td>2026-07-04</td><td>午後休</td><td><span class="tag">取消済み</span></td><td>—</td></tr></tbody></table></div></section>
+    </div>
+  </section>
+
+  <section id="page-attendance" class="demo-page">
+    <div class="page-head"><div><h1>出退勤</h1><p class="muted">サーバーの日本時間で記録されます。</p></div><span id="attendance-status" class="status">退勤中</span></div>
+    <section class="panel clock-panel"><p>現在時刻</p><strong id="clock">2026/09/01 09:00:00</strong><button id="attendance-clock" class="primary big">出勤を記録</button></section>
+    <section class="panel"><h2>打刻履歴</h2><div class="table-wrap"><table><thead><tr><th>日時</th><th>種別</th></tr></thead><tbody id="clock-history"><tr><td>2026-08-31 18:12:03</td><td>退勤</td></tr><tr><td>2026-08-31 08:54:21</td><td>出勤</td></tr><tr><td>2026-08-28 17:58:44</td><td>退勤</td></tr></tbody></table></div></section>
+  </section>
+
+  <section id="page-notice" class="demo-page">
+    <div class="page-head"><div><h1>勤怠連絡</h1><p class="muted">遅刻・早退・欠勤などを登録します。</p></div></div>
+    <div class="two-col form-first"><section class="panel"><h2>新しい連絡</h2><form class="demo-form"><label>対象日<input type="date" value="2026-09-01" required></label><label>勤怠種別<select><option>遅刻</option><option>早退</option><option>有給休暇（1日）</option><option>有給休暇（午前休）</option><option>有給休暇（午後休）</option><option>欠勤</option><option>休日出勤</option><option>健康診断</option><option>その他</option></select></label><div class="field-row"><label>出勤見込み<input type="time" value="10:30"></label><label>退勤見込み<input type="time"></label></div><label>連絡内容・理由<textarea rows="4">電車遅延のため、到着が遅れる見込みです。</textarea></label><button class="primary">登録する</button></form></section><section class="panel"><h2>登録履歴</h2><div class="table-wrap"><table><thead><tr><th>対象日</th><th>種別</th><th>内容</th></tr></thead><tbody><tr><td>2026-08-28</td><td>遅刻</td><td>電車遅延</td></tr><tr><td>2026-08-14</td><td>健康診断</td><td>午後から出勤予定</td></tr></tbody></table></div></section></div>
+  </section>
+
+  <section id="page-admin" class="demo-page">
+    <div class="admin-shell">
+      <aside class="admin-sidebar"><div class="admin-identity"><small>管理者</small><strong>管理 太郎</strong></div><nav class="admin-menu"><button class="active" data-admin-view="overview">概要</button><button data-admin-view="users">社員</button><button data-admin-view="leave-admin">有給</button><button data-admin-view="attendance-admin">勤怠</button><button data-admin-view="audit">操作履歴</button></nav></aside>
+      <div class="admin-content">
+        <section id="admin-overview" class="admin-view active"><div class="admin-view-head"><div><p class="eyebrow">ADMIN DASHBOARD</p><h1>管理ダッシュボード</h1><p class="muted">2026年9月1日（火）11:30 更新</p></div><button class="button demo-action">データを更新</button></div>
+          <div class="admin-kpis"><article class="admin-kpi"><span>有効アカウント</span><strong>20名</strong><em>全20名</em></article><article class="admin-kpi"><span>現在出勤中</span><strong>14名</strong><em>出勤率 70%</em></article><article class="admin-kpi"><span>本日の有給</span><strong>2名</strong><em>午後休 1名</em></article><article class="admin-kpi"><span>未確認の勤怠連絡</span><strong>3件</strong><em>要確認</em></article></div>
+          <div class="admin-split"><section class="panel"><div class="section-head"><h2>確認が必要な項目</h2><button class="button small" data-admin-view="attendance-admin">すべて確認</button></div><div class="alert-list"><div class="alert-row"><span class="alert-dot"></span><div><strong>田中 次郎さんから遅刻連絡</strong><small>本日 10:30出勤見込み・電車遅延</small></div></div><div class="alert-row"><span class="alert-dot"></span><div><strong>佐藤 花子さんの打刻状態</strong><small>昨日の退勤打刻がありません</small></div></div><div class="alert-row"><span class="alert-dot"></span><div><strong>有給の失効予定</strong><small>60日以内に3名・合計8.5日が失効予定</small></div></div></div></section><section class="panel"><h2>現在の出勤状況</h2><ul class="item-list"><li><strong>出勤中</strong><span>14名</span></li><li><strong>退勤済み</strong><span>2名</span></li><li><strong>未出勤</strong><span>2名</span></li><li><strong>休暇</strong><span>2名</span></li></ul></section></div>
+          <section class="panel" style="margin-top:18px"><div class="section-head"><h2>直近の有給予定</h2><button class="button small" data-admin-view="leave-admin">有給管理へ</button></div><div class="table-wrap"><table><thead><tr><th>取得日</th><th>社員</th><th>区分</th><th>予定反映後残数</th><th>事前確認</th></tr></thead><tbody><tr><td>9月8日</td><td>佐藤 花子</td><td>1日</td><td>8.0日</td><td>営業部長</td></tr><tr><td>9月11日</td><td>鈴木 一郎</td><td>午後休</td><td>12.5日</td><td>管理 太郎</td></tr><tr><td>9月18日</td><td>平田 太郎</td><td>1日</td><td>11.0日</td><td>営業部長</td></tr></tbody></table></div></section>
+        </section>
+        <section id="admin-users" class="admin-view"><div class="admin-view-head"><div><h1>社員管理</h1><p class="muted">アカウントの作成・検索・無効化</p></div><button class="primary demo-action">社員を追加</button></div><div class="panel"><div class="admin-toolbar"><input type="search" placeholder="氏名・社員番号・メールで検索"><select><option>すべての状態</option><option>有効</option><option>無効</option></select></div><div class="table-wrap"><table><thead><tr><th>社員</th><th>社員番号</th><th>メール</th><th>権限</th><th>状態</th><th>最終ログイン</th></tr></thead><tbody><tr><td><strong>平田 太郎</strong></td><td>EMP001</td><td>hirata@example.co.jp</td><td>社員</td><td><span class="mini-status">有効</span></td><td>本日 08:54</td></tr><tr><td><strong>佐藤 花子</strong></td><td>EMP002</td><td>sato@example.co.jp</td><td>社員</td><td><span class="mini-status">有効</span></td><td>昨日 17:58</td></tr><tr><td><strong>管理 太郎</strong></td><td>ADM001</td><td>admin@example.co.jp</td><td>管理者</td><td><span class="mini-status">有効</span></td><td>本日 08:30</td></tr><tr><td><strong>退職 太郎</strong></td><td>EMP018</td><td>former@example.co.jp</td><td>社員</td><td><span class="mini-status off">無効</span></td><td>2026/07/31</td></tr></tbody></table></div></div></section>
+        <section id="admin-leave-admin" class="admin-view"><div class="admin-view-head"><div><h1>有給管理</h1><p class="muted">社員別残数・年度内訳・付与・調整</p></div><div><button class="button demo-action">残数調整</button> <button class="primary demo-action">有給を付与</button></div></div><div class="panel"><div class="admin-toolbar"><input type="search" placeholder="社員を検索"><select><option>残数の少ない順</option><option>氏名順</option><option>失効日の近い順</option></select></div><div class="table-wrap"><table><thead><tr><th>社員</th><th>前年繰越</th><th>今年付与</th><th>現在残数</th><th>取得予定</th><th>予定反映後</th><th>次回失効</th></tr></thead><tbody><tr><td><strong>平田 太郎</strong></td><td>3.5日</td><td>9.0日</td><td>12.5日</td><td>1.5日</td><td><strong>11.0日</strong></td><td>2026/12/31</td></tr><tr><td><strong>佐藤 花子</strong></td><td>0.0日</td><td>9.0日</td><td>9.0日</td><td>1.0日</td><td><strong>8.0日</strong></td><td>2027/12/31</td></tr><tr><td><strong>鈴木 一郎</strong></td><td>4.0日</td><td>9.0日</td><td>13.0日</td><td>0.5日</td><td><strong>12.5日</strong></td><td>2026/10/15</td></tr></tbody></table></div></div></section>
+        <section id="admin-attendance-admin" class="admin-view"><div class="admin-view-head"><div><h1>全社勤怠</h1><p class="muted">当日の状況と勤怠連絡</p></div><button class="button demo-action">CSV出力</button></div><div class="admin-split"><section class="panel"><h2>出勤中の社員</h2><div class="table-wrap"><table><thead><tr><th>社員</th><th>出勤時刻</th><th>経過</th></tr></thead><tbody><tr><td>平田 太郎</td><td>08:54</td><td>2時間36分</td></tr><tr><td>管理 太郎</td><td>08:30</td><td>3時間00分</td></tr><tr><td>鈴木 一郎</td><td>09:03</td><td>2時間27分</td></tr></tbody></table></div></section><section class="panel"><h2>本日の勤怠連絡</h2><div class="alert-list"><div class="alert-row"><span class="alert-dot"></span><div><strong>田中 次郎・遅刻</strong><small>10:30出勤見込み</small></div></div><div class="alert-row"><span class="alert-dot" style="background:#4c9b88"></span><div><strong>鈴木 一郎・午後休</strong><small>13:00退勤予定</small></div></div></div></section></div></section>
+        <section id="admin-audit" class="admin-view"><div class="admin-view-head"><div><h1>操作履歴</h1><p class="muted">重要操作の変更前後と接続元</p></div><button class="button demo-action">期間を指定</button></div><div class="panel"><div class="table-wrap"><table><thead><tr><th>日時</th><th>操作者</th><th>操作</th><th>対象</th><th>接続元</th></tr></thead><tbody><tr><td>本日 11:12</td><td>管理 太郎</td><td><span class="log-action">leave_granted</span></td><td>佐藤 花子・9.0日</td><td>192.0.2.10</td></tr><tr><td>本日 09:03</td><td>鈴木 一郎</td><td><span class="log-action">clock_in</span></td><td>打刻 #3012</td><td>192.0.2.24</td></tr><tr><td>本日 08:54</td><td>平田 太郎</td><td><span class="log-action">clock_in</span></td><td>打刻 #3011</td><td>192.0.2.18</td></tr><tr><td>昨日 18:12</td><td>平田 太郎</td><td><span class="log-action">clock_out</span></td><td>打刻 #3009</td><td>192.0.2.18</td></tr></tbody></table></div></div></section>
+      </div>
+    </div>
+  </section>
+</main>
+<footer>UI確認用プレビュー — 日時は日本標準時（JST）</footer>
+<div id="toast" class="demo-toast">デモ操作を反映しました</div>
+<script>
+  const pages=document.querySelectorAll('.demo-page');
+  function showPage(name){pages.forEach(p=>p.classList.toggle('active',p.id==='page-'+name));document.querySelectorAll('.demo-nav [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));document.getElementById('app-header').classList.toggle('login-hidden',name==='login');document.querySelector('.nav').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'})}
+  document.querySelectorAll('[data-page]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();showPage(el.dataset.page)}));
+  document.querySelectorAll('.demo-form').forEach(form=>form.addEventListener('submit',e=>{e.preventDefault();toast('デモ登録しました（保存はされません）')}));
+  document.getElementById('demo-login-form').addEventListener('submit',e=>{e.preventDefault();showPage('home');toast('ログインしました')});
+  document.querySelectorAll('.demo-action').forEach(button=>button.addEventListener('click',()=>toast('デモ取消しました（保存はされません）')));
+  function toast(message){const el=document.getElementById('toast');el.textContent=message;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2200)}
+  let working=false;
+  function clockAction(){working=!working;document.querySelectorAll('#home-status,#attendance-status').forEach(el=>{el.textContent=working?'出勤中':'退勤中';el.classList.toggle('working',working)});document.getElementById('home-clock').textContent=working?'退勤する':'出勤する';document.getElementById('attendance-clock').textContent=working?'退勤を記録':'出勤を記録';toast(working?'出勤を記録しました':'退勤を記録しました')}
+  document.getElementById('home-clock').addEventListener('click',clockAction);document.getElementById('attendance-clock').addEventListener('click',clockAction);
+  setInterval(()=>document.getElementById('clock').textContent=new Intl.DateTimeFormat('ja-JP',{dateStyle:'medium',timeStyle:'medium',timeZone:'Asia/Tokyo'}).format(new Date()),1000);
+  document.querySelectorAll('[data-admin-view]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();const name=el.dataset.adminView;document.querySelectorAll('.admin-view').forEach(view=>view.classList.toggle('active',view.id==='admin-'+name));document.querySelectorAll('.admin-menu [data-admin-view]').forEach(button=>button.classList.toggle('active',button.dataset.adminView===name))}));
+  if(location.hash==='#admin')showPage('admin');
+</script>
+</body>
+</html>
