@@ -4,6 +4,7 @@ use App\Csrf;
 $user = Auth::user();
 $flashes = $_SESSION['flash'] ?? [];
 unset($_SESSION['flash']);
+$assetVersion = '20260903-5';
 ?>
 <!doctype html>
 <html lang="ja">
@@ -13,11 +14,12 @@ unset($_SESSION['flash']);
   <meta name="theme-color" content="#176b5b">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <?php if ($user): ?><meta name="csrf-token" content="<?= e(Csrf::token()) ?>"><meta name="vapid-public-key" content="<?= e(\App\PushService::publicKey()) ?>"><?php endif; ?>
   <title><?= e($title ?? '勤怠管理') ?> | 社内勤怠管理</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="/assets/app.css">
-  <script src="/assets/app.js" defer></script>
+  <link rel="stylesheet" href="/assets/app.css?v=<?= e($assetVersion) ?>">
+  <script src="/assets/app.js?v=<?= e($assetVersion) ?>" defer></script>
 </head>
 <body>
 <?php if ($user): ?>
@@ -29,8 +31,10 @@ unset($_SESSION['flash']);
       <a href="<?= e(url('leave')) ?>">有給</a>
       <a href="<?= e(url('attendance')) ?>">出退勤</a>
       <a href="<?= e(url('notice')) ?>">勤怠連絡</a>
+      <a href="<?= e(url('viewable')) ?>">閲覧</a>
+      <a href="<?= e(url('sharing')) ?>">公開設定</a>
+      <a href="<?= e(url('security')) ?>">セキュリティ</a>
       <?php if ($user['role'] === 'admin'): ?><a href="<?= e(url('admin')) ?>">管理</a><?php endif; ?>
-      <button type="button" id="pwa-install" class="install-button" hidden>アプリを追加</button>
       <form method="post" action="<?= e(url('logout')) ?>" class="nav-form"><?= Csrf::field() ?><button>ログアウト</button></form>
     </nav>
   </header>

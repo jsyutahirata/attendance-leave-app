@@ -29,11 +29,11 @@ for (const file of phpFiles) {
 const controller = await readFile(new URL('src/Controller.php', root), 'utf8');
 const layout = await readFile(new URL('views/layout.php', root), 'utf8');
 const schema = await readFile(new URL('database/schema.sql', root), 'utf8');
-for (const table of ['users','employees','leave_grants','leave_entries','leave_adjustments','attendance_events','attendance_notices','audit_logs','password_reset_tokens','remember_login_tokens']) {
+for (const table of ['users','employees','leave_grants','leave_entries','leave_adjustments','attendance_events','attendance_notices','audit_logs','password_reset_tokens','remember_login_tokens','app_settings','push_subscriptions','push_preferences','push_notification_logs']) {
   if (!schema.includes(`CREATE TABLE ${table}`)) failures.push(`schema: missing ${table}`);
 }
 if ((schema.match(/grant_year SMALLINT/g) ?? []).length !== 2) failures.push('schema: leave grant year fields are incomplete');
-for (const route of ['login','leave/create','leave/cancel','attendance/clock','notice/create','admin/users/create','admin/leave/create','admin/leave/grant','admin/attendance']) {
+for (const route of ['login','leave/create','leave/cancel','attendance/clock','notice/create','admin/users/create','admin/leave/create','admin/leave/grant','admin/leave/review','admin/settings/approval','push/subscribe','push/unsubscribe','push/preferences','push/electron-check','admin/attendance']) {
   if (!controller.includes(`'${route}'`)) failures.push(`controller: missing ${route}`);
 }
 if (!layout.includes('Csrf::field()')) failures.push('layout: logout is not CSRF protected');

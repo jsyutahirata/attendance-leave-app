@@ -1,0 +1,1 @@
+require dirname(__DIR__) . '/attendance_app/src/bootstrap.php';

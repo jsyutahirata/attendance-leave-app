@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "npm run build && electron .",
-    "package:win": "npm run build && electron-builder --win --x64"
+    "package:win": "node scripts/write-config.mjs && npm run build && electron-builder --win --x64"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -20,6 +20,7 @@
     "productName": "社内勤怠管理",
     "files": ["dist/**/*", "package.json"],
     "directories": {"output": "release", "buildResources": "resources"},
+    "extraResources": [{"from": "resources/app-config.json", "to": "app-config.json"}],
     "win": {"target": "nsis", "icon": "resources/icon.png"},
     "nsis": {"oneClick": false, "allowToChangeInstallationDirectory": true}
   }

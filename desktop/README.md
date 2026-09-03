@@ -12,4 +12,11 @@
 
 ## Windowsパッケージ
 
-`npm run package:win`でNSISインストーラーを生成します。正式配布前にアプリID、会社名、コード署名証明書、自動更新方式を確定してください。
+PowerShellで本番URLを指定してからNSISインストーラーを生成します。URLは生成物内の`app-config.json`へ埋め込まれ、実行PCで環境変数を設定する必要はありません。
+
+```powershell
+$env:ATTENDANCE_APP_URL='https://attendance.example.co.jp/index.php'
+npm run package:win
+```
+
+Electronで標準Web Pushが利用できない場合は、ログイン中にサーバーを定期確認してOSネイティブ通知を表示します。ウィンドウを閉じても通知領域に常駐し、トレイメニューの「終了」で完全終了します。業務データは端末へ保存しません。正式配布前に`appId`、会社名、コード署名証明書、自動更新方式を確定してください。

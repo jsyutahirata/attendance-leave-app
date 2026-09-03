@@ -14,21 +14,69 @@
     window.addEventListener('load', () => navigator.serviceWorker.register('/service-worker.js'));
   }
 
-  let installPrompt = null;
-  const installButton = document.getElementById('pwa-install');
-  window.addEventListener('beforeinstallprompt', event => {
-    event.preventDefault();
-    installPrompt = event;
-    if (installButton) installButton.hidden = false;
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+  const vapidPublicKey = document.querySelector('meta[name="vapid-public-key"]')?.content ?? '';
+  const pushState = document.getElementById('push-state');
+  const pushEnable = document.getElementById('push-enable');
+  const pushDisable = document.getElementById('push-disable');
+  const postForm = async (route, values = {}) => {
+    const body = new URLSearchParams({csrf_token: csrf, ...values});
+    const response = await fetch(`/index.php?route=${encodeURIComponent(route)}`, {method: 'POST', body, credentials: 'same-origin'});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || '処理に失敗しました。');
+    return data;
+  };
+  const base64UrlToUint8 = value => {
+    const padding = '='.repeat((4 - value.length % 4) % 4);
+    const raw = atob((value + padding).replaceAll('-', '+').replaceAll('_', '/'));
+    return Uint8Array.from([...raw].map(char => char.charCodeAt(0)));
+  };
+  const refreshPushState = async () => {
+    if (!pushState) return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      pushState.textContent = 'この環境は標準Web Pushに対応していません。Electronではネイティブ通知で補完します。';
+      if (pushEnable) pushEnable.hidden = true;
+      return;
+    }
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    pushState.textContent = subscription ? 'この端末の通知は有効です。' : 'この端末の通知は無効です。';
+    if (pushEnable) pushEnable.hidden = Boolean(subscription);
+    if (pushDisable) pushDisable.hidden = !subscription;
+  };
+  pushEnable?.addEventListener('click', async () => {
+    try {
+      if (!vapidPublicKey) throw new Error('サーバーのVAPIDキーが未設定です。');
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') throw new Error('通知が許可されませんでした。ブラウザまたはOSの設定を確認してください。');
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: base64UrlToUint8(vapidPublicKey)});
+      await postForm('push/subscribe', {subscription: JSON.stringify(subscription.toJSON())});
+      await refreshPushState();
+    } catch (error) { if (pushState) pushState.textContent = error.message; }
   });
-  installButton?.addEventListener('click', async () => {
-    if (!installPrompt) return;
-    await installPrompt.prompt();
-    installPrompt = null;
-    installButton.hidden = true;
+  pushDisable?.addEventListener('click', async () => {
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        await postForm('push/unsubscribe', {endpoint: subscription.endpoint});
+        await subscription.unsubscribe();
+      }
+      await refreshPushState();
+    } catch (error) { if (pushState) pushState.textContent = error.message; }
   });
-  window.addEventListener('appinstalled', () => {
-    installPrompt = null;
-    if (installButton) installButton.hidden = true;
-  });
+  refreshPushState().catch(() => {});
+
+  if (window.attendanceDesktop && csrf) {
+    const checkDesktopReminder = async () => {
+      try {
+        const data = await postForm('push/electron-check');
+        if (data.notification) window.attendanceDesktop.showNotification(data.notification);
+      } catch (_) {}
+    };
+    window.addEventListener('load', checkDesktopReminder);
+    setInterval(checkDesktopReminder, 60_000);
+  }
+
 })();

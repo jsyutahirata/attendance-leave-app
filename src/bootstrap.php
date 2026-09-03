@@ -1,6 +1,13 @@
 <?php
 declare(strict_types=1);
 
+// Composer依存（TOTP: spomky-labs/otphp、QR: bacon/bacon-qr-code、Web Push: minishlink/web-push）を読み込む。
+// XServerでは `composer install` するか、vendor/ ディレクトリをアップロードすること。
+$composerAutoload = dirname(__DIR__) . '/vendor/autoload.php';
+if (is_file($composerAutoload)) {
+    require $composerAutoload;
+}
+
 spl_autoload_register(static function (string $class): void {
     $prefix = 'App\\';
     if (str_starts_with($class, $prefix)) {
@@ -39,7 +46,7 @@ if (PHP_SAPI !== 'cli' && config('APP_ENV', 'production') === 'production') {
         header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
     }
 }
-if (session_status() !== PHP_SESSION_ACTIVE) {
+if (PHP_SAPI !== 'cli' && session_status() !== PHP_SESSION_ACTIVE) {
     session_name('attendance_session');
     session_set_cookie_params([
         'lifetime' => 0,

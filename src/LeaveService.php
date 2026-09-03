@@ -30,7 +30,7 @@ final class LeaveService
 
         // Replay taken leave against the grant that expired first. This keeps an
         // already-used expired grant from reducing today's balance a second time.
-        $stmt = $pdo->prepare("SELECT leave_date, days FROM leave_entries WHERE employee_id = ? AND status <> 'cancelled' AND leave_date < CURDATE() ORDER BY leave_date, id");
+        $stmt = $pdo->prepare("SELECT leave_date, days FROM leave_entries WHERE employee_id = ? AND status IN ('registered','approved','taken') AND leave_date < CURDATE() ORDER BY leave_date, id");
         $stmt->execute([$employeeId]);
         $unfundedTaken = 0.0;
         foreach ($stmt->fetchAll() as $entry) {
@@ -72,7 +72,7 @@ final class LeaveService
         $unfundedTaken -= $fromPrevious;
         $currentYearRemaining -= $unfundedTaken;
 
-        $stmt = $pdo->prepare("SELECT COALESCE(SUM(days), 0) FROM leave_entries WHERE employee_id = ? AND status <> 'cancelled' AND leave_date >= CURDATE()");
+        $stmt = $pdo->prepare("SELECT COALESCE(SUM(days), 0) FROM leave_entries WHERE employee_id = ? AND status IN ('pending','registered','approved') AND leave_date >= CURDATE()");
         $stmt->execute([$employeeId]);
         $scheduled = (float)$stmt->fetchColumn();
 
@@ -118,16 +118,17 @@ final class LeaveService
             if (self::summary($employeeId)['forecast'] < $days) {
                 throw new DomainException('予定反映後の残数が不足しています。');
             }
-            $stmt = $pdo->prepare("SELECT id FROM leave_entries WHERE employee_id = ? AND leave_date = ? AND status <> 'cancelled' FOR UPDATE");
+            $stmt = $pdo->prepare("SELECT id FROM leave_entries WHERE employee_id = ? AND leave_date = ? AND status NOT IN ('cancelled','rejected') FOR UPDATE");
             $stmt->execute([$employeeId, $date]);
             if ($stmt->fetch()) {
                 throw new DomainException('同じ日付の有給がすでに登録されています。');
             }
-            $status = $date < date('Y-m-d') ? 'taken' : 'registered';
+            $isAdmin = (Auth::user()['role'] ?? 'employee') === 'admin';
+            $status = $date < date('Y-m-d') ? 'taken' : (!$isAdmin && Settings::bool('leave_approval_required', true) ? 'pending' : 'registered');
             $stmt = $pdo->prepare('INSERT INTO leave_entries (employee_id, leave_date, leave_type, days, status, note, confirmed_with, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())');
             $stmt->execute([$employeeId, $date, $type, $days, $status, trim((string)($input['note'] ?? '')), trim((string)($input['confirmed_with'] ?? '')), $actorId ?? Auth::id()]);
             $id = (int)$pdo->lastInsertId();
-            Audit::log('leave_created', 'leave_entry', $id, null, ['employee_id' => $employeeId, 'date' => $date, 'type' => $type, 'days' => $days], $actorId);
+            Audit::log('leave_created', 'leave_entry', $id, null, ['employee_id' => $employeeId, 'date' => $date, 'type' => $type, 'days' => $days, 'status' => $status], $actorId);
             if ($ownsTransaction) {
                 $pdo->commit();
             }
@@ -154,8 +155,8 @@ final class LeaveService
             if (!$entry || (!$isAdmin && (int)$entry['employee_id'] !== Auth::employeeId())) {
                 throw new DomainException('対象の有給予定が見つかりません。');
             }
-            if ($entry['status'] === 'cancelled') {
-                throw new DomainException('この予定はすでに取消済みです。');
+            if (in_array($entry['status'], ['cancelled', 'rejected'], true)) {
+                throw new DomainException('この予定は取消済みまたは却下済みです。');
             }
             if (!$isAdmin && $entry['leave_date'] < date('Y-m-d')) {
                 throw new DomainException('過去の有給は管理者だけが訂正できます。');
@@ -166,6 +167,32 @@ final class LeaveService
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    public static function review(int $entryId, string $decision, string $reason = ''): void
+    {
+        if (!in_array($decision, ['approve', 'reject'], true)) throw new DomainException('承認操作が正しくありません。');
+        if ($decision === 'reject' && trim($reason) === '') throw new DomainException('却下理由を入力してください。');
+        $pdo = Database::connection();
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare('SELECT * FROM leave_entries WHERE id = ? FOR UPDATE');
+            $stmt->execute([$entryId]);
+            $entry = $stmt->fetch();
+            if (!$entry || $entry['status'] !== 'pending') throw new DomainException('承認待ちの有給予定が見つかりません。');
+            if ($decision === 'approve') {
+                $status = $entry['leave_date'] < date('Y-m-d') ? 'taken' : 'approved';
+                $pdo->prepare('UPDATE leave_entries SET status=?, reviewed_by=?, reviewed_at=NOW(), rejection_reason=NULL, updated_at=NOW() WHERE id=?')->execute([$status, Auth::id(), $entryId]);
+                Audit::log('leave_approved', 'leave_entry', $entryId, $entry, ['status' => $status]);
+            } else {
+                $pdo->prepare("UPDATE leave_entries SET status='rejected', reviewed_by=?, reviewed_at=NOW(), rejection_reason=?, updated_at=NOW() WHERE id=?")->execute([Auth::id(), trim($reason), $entryId]);
+                Audit::log('leave_rejected', 'leave_entry', $entryId, $entry, ['status' => 'rejected', 'reason' => trim($reason)]);
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
     }

@@ -16,7 +16,7 @@ try {
         Csrf::verify();
     }
 
-    $publicRoutes = ['login', 'forgot-password', 'reset-password'];
+    $publicRoutes = ['login', 'login/totp', 'forgot-password', 'reset-password'];
     if (!in_array($route, $publicRoutes, true)) {
         Auth::requireLogin();
     }

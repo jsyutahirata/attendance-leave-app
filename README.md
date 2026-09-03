@@ -16,36 +16,86 @@
 - 30日間のログイン保持（一般社員のみ、トークンはハッシュ保存・利用時更新）
 - アカウント状態のステータス管理（有効/無効/休職中）と、無効化・パスワード変更・強制ログアウト時の全端末セッション即時失効
 - 所有者・閲覧権限照合の共通クラス（`src/Access.php`）
+- 指定月の全社員出退勤打刻のCSVエクスポート（管理者専用・BOM付きUTF-8・一時ファイルを残さずストリーム・実行を監査ログに記録）
+- 代休（休日出勤の勤怠連絡で自動発生、事業年度末＝翌3/31まで有効、取得予定の登録・取消、社員ホーム・管理者画面での残数/一覧表示、管理者による発生取消）
+- 閲覧権限（管理者権限とは独立した「閲覧のみ」の権限。個人・グループ単位で付与、閲覧専用ページ、本人によるセルフサービス公開設定、管理者のグループ管理・権限一覧/付与/削除、所有者・閲覧権限照合を`src/Access.php`に集約、無効化時に関連権限・所属を整理）
+- 二要素認証（TOTP。本人が任意で有効化＝QRコードでシークレット登録・バックアップコード10個発行、二段階ログイン、バックアップコードは単回使用、管理者による無効化リセット。TOTP検証は`spomky-labs/otphp`、QRは`bacon/bacon-qr-code`のSVG）
+- 出退勤の月次集計（社員別の出勤日数・勤務時間。業務日＝出勤日で日跨ぎ退勤に対応、未退勤件数を表示。管理者の月次集計画面と社員本人の当月サマリー。ペアリングはCSV出力と共通の`src/AttendanceService.php`。休憩・残業の控除は未実装＝ルール未確定）
 - PWAマニフェスト、ホーム画面アイコン、Service Worker、オフライン案内
-- TypeScript製Electronクライアントの骨格
+- 有給承認フロー（管理者の承認・却下、管理画面からON/OFF。初期値ON、OFF時は承認待ちを通常登録へ移行）
+- Web Push退勤忘れ通知（社員ごとの通知ON/OFF・通知時刻、端末ごとの購読ON/OFF、VAPID送信、期限切れ購読の掃除、同一勤務日の重複防止、Electronネイティブ通知フォールバック）
+- TypeScript製Electronクライアント（同一Webアプリ、外部遷移・権限制限、本番URL埋め込み、Windows NSISパッケージ）
 
 ## 必要環境
 
-- PHP 8.1 以上（PDO MySQL、mbstring）
+- PHP 8.2 以上（PDO MySQL、mbstring、curl、JSON、OpenSSL）
 - MySQL 5.7 以上または MariaDB 10.4 以上
 - Apache（`mod_rewrite` が利用可能なこと）
 - HTTPS
+- Composer 依存（TOTP: `spomky-labs/otphp`、QR: `bacon/bacon-qr-code`）。QRはSVG生成のためGD拡張は不要。
 
 ## セットアップ
 
 1. `.env.example` を `.env` にコピーし、URL、DB接続情報、メール送信元を設定します。
-2. MySQLに空のデータベースと専用ユーザーを作成します。
-3. `database/schema.sql` を対象データベースへインポートします。
+2. 依存パッケージを用意します。XServerにSSHでComposerが使える場合は公開領域外で `composer install --no-dev` を実行します。使えない場合は、ローカルで `composer install --no-dev` した `vendor/` ディレクトリをそのままアップロードします（`vendor/` は `public` の外に置くこと）。
+3. MySQLに空のデータベースと専用ユーザーを作成します。
+4. `database/schema.sql` を対象データベースへインポートします。
 
-既存データベースを更新する場合は、全体の再インポートではなく`database/migrations/`内の未適用マイグレーションをファイル名順に適用してください。v0.4対応では`20260901_add_user_status_and_session_token.sql`（`users.is_active`をステータス値へ移行し、全端末失効用の`session_token`を追加）を適用します。
-4. Webサーバーのドキュメントルートを `public` ディレクトリへ設定します。
-5. 最初の管理者をCLIで作成します。
+   新規構築では `schema.sql` に全テーブルが含まれるため、これだけで完了します。既存の稼働中データベースを更新する場合のみ、`database/migrations/` 内の未適用マイグレーションをファイル名順に適用してください（v0.4では `20260901_add_user_status_and_session_token.sql`、`20260901_add_comp_leave.sql`、`20260901_add_view_grants_and_groups.sql`、`20260902_add_totp.sql`、`20260902_add_app_settings.sql`、`20260902_add_leave_approval_and_push.sql`、`20260902_add_push_preferences.sql`）。
+5. Webサーバーのドキュメントルートを `public` ディレクトリへ設定します。
+6. 最初の管理者をCLIで作成します。
 
 ```bash
 php scripts/create-admin.php admin@example.co.jp "管理 太郎" "12文字以上の安全な初期パスワード" ADM001
 ```
 
-6. `.env` と `src`、`database`、`scripts` がWebから直接公開されていないこと、HTTPSへの転送、XServer WAF、バックアップを確認します。
+7. `.env`、`src`、`database`、`scripts`、`vendor` がWebから直接公開されていないこと、HTTPSへの転送、XServer WAF、バックアップを確認します。
 
-7. XServerのCronで次のコマンドを毎日深夜に実行します（PHPと配置先は実環境のパスへ変更）。取得日を過ぎた予定の状態更新と、古い再設定トークンの掃除を行います。
+8. Web Push用のVAPIDキーを生成し、出力された2行を`.env`へ設定します。秘密鍵は公開領域へ置かず、運用開始後は同じキーを維持してください。
+
+```bash
+php scripts/generate-vapid-keys.php
+```
+
+9. XServerのCronでメンテナンスを毎日深夜、退勤忘れ通知を5分おきに実行します（PHPと配置先は実環境のパスへ変更）。社員本人がセキュリティ設定画面で通知のON/OFFと時刻を設定できます。`.env`の`PUSH_REMINDER_TIME`（既定18:00）は未設定社員の初期値です。同一日に一度だけ通知し、退勤済み・有給・通知購読なしの社員は対象外です。
 
 ```bash
 /usr/bin/php /home/account/app/scripts/maintenance.php
+*/5 * * * * /usr/bin/php /home/account/app/scripts/push-reminders.php
+```
+
+## ローカル開発（Windows / XAMPP）
+
+手元Windowsでの動作確認は、XAMPP同梱のPHPとMariaDBを使い、Apacheを立てずにPHPビルトインサーバーで動かせます（ルーティングは `index.php?route=` 直リンクのため mod_rewrite 不要）。
+
+1. XAMPP（PHP 8.1以上同梱）を `C:\xampp` に導入する。
+2. MariaDBを起動し、DBとユーザーを作成、`database/schema.sql` をインポートする。
+
+```powershell
+& 'C:\xampp\mysql\bin\mysqld.exe' --defaults-file='C:\xampp\mysql\bin\my.ini'
+# 別ウィンドウで
+'CREATE DATABASE IF NOT EXISTS attendance CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ CREATE USER IF NOT EXISTS ''attendance_user''@''localhost'' IDENTIFIED BY ''attendance_pass'';
+ GRANT ALL PRIVILEGES ON attendance.* TO ''attendance_user''@''localhost''; FLUSH PRIVILEGES;' | & 'C:\xampp\mysql\bin\mysql.exe' -u root
+Get-Content -Raw -Encoding UTF8 database\schema.sql | & 'C:\xampp\mysql\bin\mysql.exe' -u root attendance
+```
+
+3. `.env` を作成し、`APP_ENV=local`（HTTPS強制とSecure Cookieを無効化）、`DB_*` をローカル値にする。
+4. 管理者を作成し、サーバーを起動する。以降の起動/停止は補助スクリプトで行える。
+
+```powershell
+& 'C:\xampp\php\php.exe' scripts\create-admin.php admin@example.co.jp "Admin" "LocalAdmin1234" ADM001
+powershell -ExecutionPolicy Bypass -File scripts\dev-local.ps1 start   # 起動（http://localhost:8000）
+powershell -ExecutionPolicy Bypass -File scripts\dev-local.ps1 stop    # 停止
+powershell -ExecutionPolicy Bypass -File scripts\dev-local.ps1 status  # 状態確認
+```
+
+ローカルではメール送信（`mail()`）は動作しないため、招待・再設定メールのリンクはDBのトークンを直接使うか、パスワードを直接設定して検証する。
+
+Web Pushの実配信をWindowsローカルで試す場合、`push-reminders.php`実行前に`OPENSSL_CONF`を設定する必要がある（未設定だとライブラリのEC鍵生成が「Unable to create the local key」で失敗する。Linux/XServerでは既定設定があるため不要）。
+
+```powershell
+$env:OPENSSL_CONF = 'C:\xampp\php\extras\ssl\openssl.cnf'; & 'C:\xampp\php\php.exe' scripts\push-reminders.php
 ```
 
 ## XServerでの配置
@@ -60,12 +110,17 @@ php scripts/create-admin.php admin@example.co.jp "管理 太郎" "12文字以上
 
 ## 未実装（後続フェーズ）
 
-- 月次集計、勤務時間・休憩・残業計算、打刻修正申請、締め処理
+- 休憩・残業・遅刻早退の自動計算、締め処理・月次確定
 - 自動付与・会社固有の繰越規則
-- CSV出力、メール通知、承認フロー、二要素認証
+- 業務イベントのメール通知（実装しない方針。パスワード再設定・初回招待の認証メールのみ使用）
 - Googleフォーム／スプレッドシートからの移行ツール
-- Web Push購読登録、退勤忘れ通知の定期送信
-- Electronのコード署名、自動更新、正式インストーラー
+- Electronのコード署名、自動更新
+
+## 対象外（実装しない方針）
+
+- 打刻修正申請
+- シフト・所定労働時間管理
+- 経費精算・領収書添付（会社適用可否が決まるまで保留）
 
 ## ディレクトリ
 

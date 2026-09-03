@@ -9,7 +9,11 @@ final class Auth
     private static ?array $user = null;
     private static bool $rememberChecked = false;
 
-    public static function attempt(string $email, string $password, bool $remember = false): bool
+    /**
+     * 認証を試みる。戻り値: 'ok'（ログイン完了）／'totp'（要二要素認証）／'fail'（失敗）。
+     * TOTP有効アカウントはパスワード検証後に完了させず、二要素認証の入力を待つ。
+     */
+    public static function attempt(string $email, string $password, bool $remember = false): string
     {
         $pdo = Database::connection();
         $stmt = $pdo->prepare('SELECT u.*, e.full_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.email = ? LIMIT 1');
@@ -25,23 +29,91 @@ final class Auth
                 $pdo->prepare('UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?')->execute([$attempts, $lockedUntil, $user['id']]);
             }
             Audit::log('login_failed', 'user', $user ? (int)$user['id'] : null, null, ['email' => $email], $user ? (int)$user['id'] : null);
-            return false;
+            return 'fail';
         }
 
-        $pdo->prepare('UPDATE users SET failed_login_attempts = 0, locked_until = NULL, last_login_at = NOW() WHERE id = ?')->execute([$user['id']]);
+        $pdo->prepare('UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?')->execute([$user['id']]);
+
+        // TOTP有効時はここでログインを完了させず、二要素認証待ちの状態を作る。
+        if ((int)$user['totp_enabled'] === 1 && $user['totp_secret']) {
+            session_regenerate_id(true);
+            $_SESSION['2fa'] = ['user_id' => (int)$user['id'], 'remember' => ($remember && $user['role'] !== 'admin'), 'ts' => time()];
+            unset($_SESSION['user_id'], $_SESSION['session_token']);
+            self::$user = null;
+            return 'totp';
+        }
+
+        self::finalizeLogin((int)$user['id'], (string)$user['session_token'], $remember && $user['role'] !== 'admin');
+        Audit::log('login_success', 'user', (int)$user['id'], null, null, (int)$user['id']);
+        return 'ok';
+    }
+
+    /** 二要素認証の入力待ちか。 */
+    public static function pending2fa(): bool
+    {
+        $p = $_SESSION['2fa'] ?? null;
+        return is_array($p) && (time() - (int)($p['ts'] ?? 0)) <= 300;
+    }
+
+    /**
+     * 二要素認証の入力を検証し、成功すればログインを完了させる。
+     * TOTPコードまたは未使用のバックアップコードを受け付ける。
+     */
+    public static function completeTotp(string $code): bool
+    {
+        $pending = $_SESSION['2fa'] ?? null;
+        if (!is_array($pending) || (time() - (int)($pending['ts'] ?? 0)) > 300) {
+            unset($_SESSION['2fa']);
+            return false;
+        }
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ? AND status = 'active'");
+        $stmt->execute([(int)$pending['user_id']]);
+        $user = $stmt->fetch();
+        if (!$user || (int)$user['totp_enabled'] !== 1 || !$user['totp_secret']) {
+            unset($_SESSION['2fa']);
+            return false;
+        }
+        $ok = Totp::verify((string)$user['totp_secret'], $code) || self::consumeBackupCode((int)$user['id'], $code);
+        if (!$ok) {
+            Audit::log('login_totp_failed', 'user', (int)$user['id'], null, null, (int)$user['id']);
+            return false;
+        }
+        unset($_SESSION['2fa']);
+        self::finalizeLogin((int)$user['id'], (string)$user['session_token'], (bool)$pending['remember']);
+        Audit::log('login_success', 'user', (int)$user['id'], null, null, (int)$user['id']);
+        return true;
+    }
+
+    private static function consumeBackupCode(int $userId, string $code): bool
+    {
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare('SELECT id FROM totp_backup_codes WHERE user_id = ? AND code_hash = ? AND used_at IS NULL LIMIT 1');
+        $stmt->execute([$userId, Totp::hashBackup($code)]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            return false;
+        }
+        $pdo->prepare('UPDATE totp_backup_codes SET used_at = NOW() WHERE id = ?')->execute([$row['id']]);
+        Audit::log('totp_backup_used', 'user', $userId, null, null, $userId);
+        return true;
+    }
+
+    /** ログインを確定する（セッション確立・失効エポック複製・保持トークン発行）。 */
+    private static function finalizeLogin(int $userId, string $sessionToken, bool $remember): void
+    {
         session_regenerate_id(true);
-        $_SESSION['user_id'] = (int)$user['id'];
+        $_SESSION['user_id'] = $userId;
         // 現在の失効エポックをセッションへ複製する。無効化・パスワード変更・強制ログアウトで
         // users.session_token がローテーションされると、複製済みの本値と不一致になり失効する。
-        $_SESSION['session_token'] = (string)$user['session_token'];
+        $_SESSION['session_token'] = $sessionToken;
         $_SESSION['last_activity'] = time();
         self::$user = null;
         self::revokeRememberCookie();
-        if ($remember && $user['role'] !== 'admin') {
-            self::issueRememberToken((int)$user['id']);
+        if ($remember) {
+            self::issueRememberToken($userId);
         }
-        Audit::log('login_success', 'user', (int)$user['id'], null, null, (int)$user['id']);
-        return true;
+        Database::connection()->prepare('UPDATE users SET last_login_at = NOW() WHERE id = ?')->execute([$userId]);
     }
 
     public static function user(): ?array
