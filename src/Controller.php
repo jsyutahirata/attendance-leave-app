@@ -22,7 +22,7 @@ final class Controller
             'POST' => [
                 'login' => 'login', 'login/totp' => 'totpVerify', 'logout' => 'logout', 'forgot-password' => 'forgot', 'reset-password' => 'reset',
                 'security/totp/init' => 'securityTotpInit', 'security/totp/confirm' => 'securityTotpConfirm', 'security/totp/disable' => 'securityTotpDisable',
-                'push/subscribe' => 'pushSubscribe', 'push/unsubscribe' => 'pushUnsubscribe', 'push/preferences' => 'pushPreferences', 'push/electron-check' => 'pushElectronCheck',
+                'push/subscribe' => 'pushSubscribe', 'push/unsubscribe' => 'pushUnsubscribe', 'push/preferences' => 'pushPreferences',
                 'admin/users/totp-disable' => 'adminUserTotpDisable',
                 'leave/create' => 'leaveCreate', 'leave/cancel' => 'leaveCancel',
                 'comp-leave/create' => 'compLeaveCreate', 'comp-leave/cancel' => 'compLeaveCancel',
@@ -146,12 +146,6 @@ final class Controller
         if ($endpoint !== '') PushService::removeSubscription((int)Auth::id(), $endpoint);
         Audit::log('push_unsubscribed', 'user', Auth::id());
         echo json_encode(['ok' => true], JSON_UNESCAPED_UNICODE);
-    }
-
-    private function pushElectronCheck(): void
-    {
-        header('Content-Type: application/json; charset=utf-8');
-        echo json_encode(['notification' => PushService::claimElectronReminder((int)Auth::id())], JSON_UNESCAPED_UNICODE);
     }
 
     /** TOTPセットアップを開始する。シークレットとバックアップコードをセッションに保持し、確認待ちにする。 */

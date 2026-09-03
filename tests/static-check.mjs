@@ -33,11 +33,11 @@ for (const table of ['users','employees','leave_grants','leave_entries','leave_a
   if (!schema.includes(`CREATE TABLE ${table}`)) failures.push(`schema: missing ${table}`);
 }
 if ((schema.match(/grant_year SMALLINT/g) ?? []).length !== 2) failures.push('schema: leave grant year fields are incomplete');
-for (const route of ['login','leave/create','leave/cancel','attendance/clock','notice/create','admin/users/create','admin/leave/create','admin/leave/grant','admin/leave/review','admin/settings/approval','push/subscribe','push/unsubscribe','push/preferences','push/electron-check','admin/attendance']) {
+for (const route of ['login','leave/create','leave/cancel','attendance/clock','notice/create','admin/users/create','admin/leave/create','admin/leave/grant','admin/leave/review','admin/settings/approval','push/subscribe','push/unsubscribe','push/preferences','admin/attendance']) {
   if (!controller.includes(`'${route}'`)) failures.push(`controller: missing ${route}`);
 }
 if (!layout.includes('Csrf::field()')) failures.push('layout: logout is not CSRF protected');
-for (const file of ['public/manifest.webmanifest','public/service-worker.js','public/assets/app.js','desktop/src/main.ts','desktop/package.json']) {
+for (const file of ['public/manifest.webmanifest','public/service-worker.js','public/assets/app.js']) {
   try { await readFile(new URL(file, root), 'utf8'); } catch { failures.push(`missing platform file: ${file}`); }
 }
 

@@ -1,6 +1,6 @@
 # 社内勤怠・有給管理アプリ
 
-約20名規模の社内利用を想定した、XServer向けの PHP / MySQL アプリです。ブラウザ版を共通基盤とし、スマートフォンではPWA、PCではブラウザまたはElectronクライアントから同じサーバーを利用します。
+約20名規模の社内利用を想定した、XServer向けの PHP / MySQL アプリです。スマートフォンではPWA、PCではブラウザから同じサーバーを利用します。
 
 ## 実装済み
 
@@ -23,8 +23,7 @@
 - 出退勤の月次集計（社員別の出勤日数・勤務時間。業務日＝出勤日で日跨ぎ退勤に対応、未退勤件数を表示。管理者の月次集計画面と社員本人の当月サマリー。ペアリングはCSV出力と共通の`src/AttendanceService.php`。休憩・残業の控除は未実装＝ルール未確定）
 - PWAマニフェスト、ホーム画面アイコン、Service Worker、オフライン案内
 - 有給承認フロー（管理者の承認・却下、管理画面からON/OFF。初期値ON、OFF時は承認待ちを通常登録へ移行）
-- Web Push退勤忘れ通知（社員ごとの通知ON/OFF・通知時刻、端末ごとの購読ON/OFF、VAPID送信、期限切れ購読の掃除、同一勤務日の重複防止、Electronネイティブ通知フォールバック）
-- TypeScript製Electronクライアント（同一Webアプリ、外部遷移・権限制限、本番URL埋め込み、Windows NSISパッケージ）
+- Web Push退勤忘れ通知（社員ごとの通知ON/OFF・通知時刻、端末ごとの購読ON/OFF、VAPID送信、期限切れ購読の掃除、同一勤務日の重複防止）
 
 ## 必要環境
 
@@ -114,7 +113,6 @@ $env:OPENSSL_CONF = 'C:\xampp\php\extras\ssl\openssl.cnf'; & 'C:\xampp\php\php.e
 - 自動付与・会社固有の繰越規則
 - 業務イベントのメール通知（実装しない方針。パスワード再設定・初回招待の認証メールのみ使用）
 - Googleフォーム／スプレッドシートからの移行ツール
-- Electronのコード署名、自動更新
 
 ## 対象外（実装しない方針）
 
@@ -126,7 +124,6 @@ $env:OPENSSL_CONF = 'C:\xampp\php\extras\ssl\openssl.cnf'; & 'C:\xampp\php\php.e
 
 ```text
 public/             Web公開ディレクトリ
-desktop/            Electron／TypeScriptクライアント
 src/                アプリケーション、認証、業務ロジック
 views/              HTMLテンプレート
 database/schema.sql 初期DBスキーマ

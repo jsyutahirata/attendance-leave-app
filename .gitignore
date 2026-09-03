@@ -9,10 +9,5 @@
 /*.zip
 /storage/logs/*
 !/storage/logs/.gitkeep
-/desktop/node_modules/
-/desktop/dist/
-/desktop/release/
-/desktop/resources/app-config.json
-
 # Machine-specific assistant/editor settings.
 /.claude/settings.local.json

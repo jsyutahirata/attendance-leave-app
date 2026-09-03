@@ -33,7 +33,7 @@
 </section>
 <section class="panel push-settings" id="push-settings">
   <h2>退勤忘れ通知</h2>
-  <p class="muted">通知の有無と時刻は社員ごとに設定できます。通知本文には勤怠の詳細や有給残数を表示しません。Electronではネイティブ通知も併用します。</p>
+  <p class="muted">通知の有無と時刻は社員ごとに設定できます。通知本文には勤怠の詳細や有給残数を表示しません。</p>
   <form method="post" action="<?= e(url('push/preferences')) ?>" class="notification-preferences">
     <?= \App\Csrf::field() ?>
     <input type="hidden" name="enabled" value="0">

@@ -97,7 +97,7 @@ final class PushService
         $rows = $stmt->fetchAll();
         if (!$rows) return ['users' => 0, 'sent' => 0, 'failed' => 0, 'expired' => 0];
 
-        // 送信前にユーザー単位で当日分を確保し、Cron重複起動やElectronフォールバックとの二重通知を防ぐ。
+        // 送信前にユーザー単位で当日分を確保し、Cron重複起動による二重通知を防ぐ。
         $claim = $pdo->prepare("INSERT IGNORE INTO push_notification_logs (user_id, notification_type, work_date, sent_at) VALUES (?, 'clock_out_reminder', CURDATE(), NOW())");
         $claimedUsers = [];
         foreach ($rows as $row) {
@@ -155,20 +155,4 @@ final class PushService
         return $stats;
     }
 
-    public static function claimElectronReminder(int $userId): ?array
-    {
-        $preference = self::preference($userId);
-        if (!$preference['enabled'] || date('H:i') < $preference['reminder_time']) return null;
-        $pdo = Database::connection();
-        $stmt = $pdo->prepare("SELECT u.employee_id FROM users u
-          JOIN attendance_events ae ON ae.id=(SELECT x.id FROM attendance_events x WHERE x.employee_id=u.employee_id ORDER BY x.occurred_at DESC,x.id DESC LIMIT 1)
-          WHERE u.id=? AND u.status='active' AND ae.event_type='clock_in'
-            AND NOT EXISTS (SELECT 1 FROM leave_entries le WHERE le.employee_id=u.employee_id AND le.leave_date=CURDATE() AND le.status IN ('registered','approved','taken'))");
-        $stmt->execute([$userId]);
-        if (!$stmt->fetchColumn()) return null;
-        $insert = $pdo->prepare("INSERT IGNORE INTO push_notification_logs (user_id, notification_type, work_date, sent_at) VALUES (?, 'clock_out_reminder', CURDATE(), NOW())");
-        $insert->execute([$userId]);
-        if ($insert->rowCount() !== 1) return null;
-        return ['title' => '退勤打刻の確認', 'body' => '出勤中です。退勤済みの場合は打刻を確認してください。'];
-    }
 }

@@ -1,7 +1,7 @@
-const CACHE_NAME = 'attendance-shell-v9';
+const CACHE_NAME = 'attendance-shell-v10';
 const SHELL_ASSETS = [
-  '/assets/app.css?v=20260903-5',
-  '/assets/app.js?v=20260903-5',
+  '/assets/app.css?v=20260903-6',
+  '/assets/app.js?v=20260903-6',
   '/assets/icons/icon-192.png',
   '/assets/icons/icon-512.png',
   '/offline.html'

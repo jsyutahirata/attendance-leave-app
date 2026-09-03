@@ -34,7 +34,7 @@
   const refreshPushState = async () => {
     if (!pushState) return;
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      pushState.textContent = 'この環境は標準Web Pushに対応していません。Electronではネイティブ通知で補完します。';
+      pushState.textContent = 'この環境はWeb Pushに対応していません。対応するブラウザまたはPWAで設定してください。';
       if (pushEnable) pushEnable.hidden = true;
       return;
     }
@@ -67,16 +67,5 @@
     } catch (error) { if (pushState) pushState.textContent = error.message; }
   });
   refreshPushState().catch(() => {});
-
-  if (window.attendanceDesktop && csrf) {
-    const checkDesktopReminder = async () => {
-      try {
-        const data = await postForm('push/electron-check');
-        if (data.notification) window.attendanceDesktop.showNotification(data.notification);
-      } catch (_) {}
-    };
-    window.addEventListener('load', checkDesktopReminder);
-    setInterval(checkDesktopReminder, 60_000);
-  }
 
 })();
