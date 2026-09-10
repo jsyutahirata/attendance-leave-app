@@ -553,6 +553,16 @@ final class Controller
             $grantId = CompLeaveService::generateForHolidayWork((int)Auth::employeeId(), $now->format('Y-m-d'), null);
         }
         $pdo->commit();
+        // 部分移行: フォーム同期対象の社員は、アプリ打刻を元Googleフォームへも転送する（ベストエフォート）。
+        try {
+            $emp = $pdo->prepare('SELECT id, full_name, form_sync_enabled, form_sync_name FROM employees WHERE id = ?');
+            $emp->execute([Auth::employeeId()]);
+            if ($row = $emp->fetch()) {
+                FormSyncService::submitForEmployee($row, $eventType);
+            }
+        } catch (\Throwable $e) {
+            error_log('[form-sync] clock hook failed: ' . $e->getMessage());
+        }
         flash('success', ($eventType === 'clock_in' ? '出勤を記録しました。' : '退勤を記録しました。') . ($grantId > 0 ? '土日の出勤につき代休1日を付与しました。' : ''));
         redirect('attendance');
     }
@@ -574,11 +584,11 @@ final class Controller
     {
         Auth::requireAdmin();
         $pdo = Database::connection();
-        $users = $pdo->query('SELECT u.*, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month FROM users u JOIN employees e ON e.id = u.employee_id ORDER BY e.full_name')->fetchAll();
+        $users = $pdo->query('SELECT u.*, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month , e.form_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id ORDER BY e.full_name')->fetchAll();
         $editUser = null;
         $editId = (int)($_GET['edit'] ?? 0);
         if ($editId > 0) {
-            $stmt = $pdo->prepare('SELECT u.*, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?');
+            $stmt = $pdo->prepare('SELECT u.*, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month , e.form_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?');
             $stmt->execute([$editId]);
             $editUser = $stmt->fetch() ?: null;
             if ($editUser === null) flash('error', '編集対象の社員が見つかりません。');
@@ -631,6 +641,8 @@ final class Controller
         $renewalMonth = $renewalMonthInput === '' ? 0 : (ctype_digit($renewalMonthInput) ? (int)$renewalMonthInput : -1);
         $role = (string)($_POST['role'] ?? '');
         $status = (string)($_POST['status'] ?? '');
+        $formSyncEnabled = ($_POST['form_sync_enabled'] ?? '') === '1' ? 1 : 0;
+        $formSyncName = trim((string)($_POST['form_sync_name'] ?? ''));
         if ($id < 1 || $name === '' || mb_strlen($name) > 100 || mb_strlen($employeeCode) > 50 || mb_strlen($email) > 255 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             flash('error', '氏名・社員番号・メールアドレスを確認してください。'); redirect('admin/users');
         }
@@ -638,12 +650,14 @@ final class Controller
             flash('error', '権限または在籍状態が正しくありません。'); redirect('admin/users');
         }
         if ($renewalMonth < 0 || $renewalMonth > 12) { flash('error', '有給更新月は1〜12で入力してください。'); redirect('admin/users'); }
+        if (mb_strlen($formSyncName) > 100) { flash('error', 'フォーム同期の氏名は100文字以内で入力してください。'); redirect('admin/users'); }
+        if ($formSyncEnabled === 1 && $formSyncName === '') { flash('error', 'フォーム同期をONにする場合は、フォームに送信する氏名を入力してください。'); redirect('admin/users'); }
         if ($hiredOn !== '') {
             $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $hiredOn);
             if (!$date || $date->format('Y-m-d') !== $hiredOn) { flash('error', '入社日を正しく入力してください。'); redirect('admin/users'); }
         }
         $pdo = Database::connection();
-        $stmt = $pdo->prepare('SELECT u.id, u.employee_id, u.email, u.role, u.status, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?');
+        $stmt = $pdo->prepare('SELECT u.id, u.employee_id, u.email, u.role, u.status, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month , e.form_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?');
         $stmt->execute([$id]); $before = $stmt->fetch();
         if (!$before) { flash('error', '対象の社員が見つかりません。'); redirect('admin/users'); }
         if ($id === Auth::id() && ($role !== 'admin' || $status !== 'active')) {
@@ -651,6 +665,7 @@ final class Controller
         }
         $employeeCode = $employeeCode === '' ? null : $employeeCode;
         $hiredOn = $hiredOn === '' ? null : $hiredOn;
+        $formSyncName = $formSyncName === '' ? null : $formSyncName;
         $stmt = $pdo->prepare('SELECT COUNT(*) FROM users WHERE email = ? AND id <> ?'); $stmt->execute([$email, $id]);
         if ((int)$stmt->fetchColumn() > 0) { flash('error', 'そのメールアドレスは別の社員が使用しています。'); redirect('admin/users'); }
         if ($employeeCode !== null) {
@@ -661,11 +676,11 @@ final class Controller
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active' AND id <> ?"); $stmt->execute([$id]);
             if ((int)$stmt->fetchColumn() < 1) { flash('error', '有効な管理者が0人になるため、この変更はできません。'); redirect('admin/users'); }
         }
-        $after = ['full_name' => $name, 'employee_code' => $employeeCode, 'hired_on' => $hiredOn, 'leave_renewal_month' => $renewalMonth ?: null, 'email' => $email, 'role' => $role, 'status' => $status];
+        $after = ['full_name' => $name, 'employee_code' => $employeeCode, 'hired_on' => $hiredOn, 'leave_renewal_month' => $renewalMonth ?: null, 'form_sync_enabled' => $formSyncEnabled, 'form_sync_name' => $formSyncName, 'email' => $email, 'role' => $role, 'status' => $status];
         $beforeAudit = array_intersect_key($before, $after);
         $pdo->beginTransaction();
         try {
-            $pdo->prepare('UPDATE employees SET full_name = ?, employee_code = ?, hired_on = ?, leave_renewal_month = ?, updated_at = NOW() WHERE id = ?')->execute([$name, $employeeCode, $hiredOn, $renewalMonth ?: null, (int)$before['employee_id']]);
+            $pdo->prepare('UPDATE employees SET full_name = ?, employee_code = ?, hired_on = ?, leave_renewal_month = ?, form_sync_enabled = ?, form_sync_name = ?, updated_at = NOW() WHERE id = ?')->execute([$name, $employeeCode, $hiredOn, $renewalMonth ?: null, $formSyncEnabled, $formSyncName, (int)$before['employee_id']]);
             $pdo->prepare('UPDATE users SET email = ?, role = ?, status = ?, updated_at = NOW() WHERE id = ?')->execute([$email, $role, $status, $id]);
             $emailOrRoleChanged = $email !== $before['email'] || $role !== $before['role'];
             $becameInactive = $status !== 'active' && $before['status'] === 'active';
@@ -749,7 +764,7 @@ final class Controller
         Auth::requireAdmin();
         $id = (int)($_POST['user_id'] ?? 0);
         $pdo = Database::connection();
-        $stmt = $pdo->prepare("SELECT u.id, u.email, u.status, e.full_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?");
+        $stmt = $pdo->prepare("SELECT u.id, u.email, u.status, e.full_name , e.form_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?");
         $stmt->execute([$id]);
         $user = $stmt->fetch();
         if (!$user) { flash('error', '対象の社員が見つかりません。'); redirect('admin/users'); }

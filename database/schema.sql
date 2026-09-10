@@ -7,6 +7,8 @@ CREATE TABLE employees (
   full_name VARCHAR(100) NOT NULL,
   hired_on DATE NULL,
   leave_renewal_month TINYINT UNSIGNED NULL,
+  form_sync_enabled TINYINT(1) NOT NULL DEFAULT 0,
+  form_sync_name VARCHAR(100) NULL,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

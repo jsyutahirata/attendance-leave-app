@@ -37,8 +37,12 @@
                 </select>
                 <?php if ((int)$editUser['id'] === \App\Auth::id()): ?><input type="hidden" name="status" value="active"><?php endif; ?>
             </label>
+            <label class="form-sync-field"><span>フォーム同期（部分移行）</span>
+                <span class="checkbox-inline"><input type="checkbox" name="form_sync_enabled" value="1" <?= (int)($editUser['form_sync_enabled'] ?? 0) === 1 ? 'checked' : '' ?>> アプリ打刻を元フォームへ転送する</span>
+            </label>
+            <label>フォーム送信氏名<input name="form_sync_name" maxlength="100" value="<?= e($editUser['form_sync_name'] ?? '') ?>" placeholder="送信先フォームの氏名と完全一致（例：平田雄大）"></label>
         </div>
-        <p class="modal-note">休職中は所属・閲覧権限を保持します。無効にすると関連設定も削除します。</p>
+        <p class="modal-note">休職中は所属・閲覧権限を保持します。無効にすると関連設定も削除します。<br>フォーム同期をONにすると、この社員がアプリで打刻するたびに、元Googleフォームへ同じ内容が自動送信されます（部分移行の対象者のみ）。氏名は送信先フォームの選択肢と完全一致させてください。</p>
         <div class="modal-actions">
             <button type="button" data-modal-close>キャンセル</button>
             <button class="primary">変更を保存</button>
