@@ -1,4 +1,4 @@
-<div class="page-head"><div><h1>閲覧</h1><p class="muted"><?= $isAdmin ? '管理者は全社員のデータを閲覧できます。' : '閲覧権限が付与された社員のデータを参照できます（読み取りのみ）。' ?></p></div></div>
+<div class="page-head"><div><h1>閲覧</h1><p class="muted"><?= $isAdmin ? '管理者は全社員のデータを閲覧できます。' : '付与された範囲の社員データを参照できます（読み取りのみ）。' ?></p></div></div>
 <section class="panel">
   <?php if (!$employees): ?>
     <p class="empty">閲覧できる社員はいません。閲覧権限は管理者、または本人の公開設定によって付与されます。</p>

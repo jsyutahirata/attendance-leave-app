@@ -1,8 +1,18 @@
-<div class="page-head"><div><h1>セキュリティ設定</h1><p class="muted">二要素認証（TOTP）でログインを保護します。</p></div></div>
+<div class="page-head"><div><h1>設定</h1><p class="muted">表示、ログイン保護、端末通知を設定します。</p></div></div>
+<section class="panel theme-settings" id="theme-settings">
+  <h2>表示テーマ</h2>
+  <p class="muted">この端末で使用する明るさを選択します。PCとスマートフォンで別々に設定できます。</p>
+  <div class="theme-options" role="radiogroup" aria-label="表示テーマ">
+    <label class="theme-choice"><input type="radio" name="display_theme" value="system"><span><strong>端末設定に合わせる</strong><small>端末のライト・ダーク設定に自動追従</small></span></label>
+    <label class="theme-choice"><input type="radio" name="display_theme" value="light"><span><strong>ライト固定</strong><small>常に明るい配色で表示</small></span></label>
+    <label class="theme-choice"><input type="radio" name="display_theme" value="dark"><span><strong>ダーク固定</strong><small>常に暗い配色で表示</small></span></label>
+  </div>
+  <p id="theme-state" class="muted" aria-live="polite"></p>
+</section>
 <section class="panel">
   <h2>二要素認証（TOTP）</h2>
   <?php if ($enabled): ?>
-    <p>状態：<span class="tag" style="background:#daf2e7;color:#176b50">有効</span></p>
+    <p>状態：<span class="tag success-tag">有効</span></p>
     <p class="muted">ログイン時に認証アプリの6桁コードが必要です。</p>
     <form method="post" action="<?= e(url('security/totp/disable')) ?>" data-confirm="二要素認証を無効にしますか？"><?= \App\Csrf::field() ?><button class="danger">無効にする</button></form>
   <?php elseif ($setup): ?>

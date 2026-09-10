@@ -11,8 +11,8 @@ require dirname(__DIR__) . '/src/bootstrap.php';
 use App\Database;
 
 [$script, $email, $name, $password, $employeeCode] = array_pad($argv, 5, '');
-if (!filter_var($email, FILTER_VALIDATE_EMAIL) || trim($name) === '' || mb_strlen($password) < 12) {
-    fwrite(STDERR, "Usage: php scripts/create-admin.php email name password [employee-code]\nPassword must contain at least 12 characters.\n");
+if (!filter_var($email, FILTER_VALIDATE_EMAIL) || trim($name) === '' || mb_strlen($password) < 8) {
+    fwrite(STDERR, "Usage: php scripts/create-admin.php email name password [employee-code]\nPassword must contain at least 8 characters.\n");
     exit(1);
 }
 

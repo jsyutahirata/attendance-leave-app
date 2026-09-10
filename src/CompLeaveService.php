@@ -87,6 +87,21 @@ final class CompLeaveService
         $pdo = Database::connection();
         $fiscalYear = self::fiscalYear($occurredOn);
         $expiresOn = self::expiryFor($occurredOn);
+        if (!$pdo->inTransaction()) {
+            throw new \LogicException('代休の自動付与はトランザクション内で実行してください。');
+        }
+        // Serialize all automatic grants for this employee, including first-ever grants.
+        $lock = $pdo->prepare('SELECT id FROM employees WHERE id = ? FOR UPDATE');
+        $lock->execute([$employeeId]);
+        if (!$lock->fetchColumn()) {
+            throw new DomainException('社員が見つかりません。');
+        }
+        // Keep administrative cancellations effective; repeated clock-ins must not restore them.
+        $existing = $pdo->prepare('SELECT id FROM comp_leave_grants WHERE employee_id = ? AND occurred_on = ? ORDER BY id LIMIT 1 FOR UPDATE');
+        $existing->execute([$employeeId, $occurredOn]);
+        if ($existing->fetchColumn()) {
+            return 0;
+        }
         $stmt = $pdo->prepare('INSERT INTO comp_leave_grants (employee_id, occurred_on, fiscal_year, days, expires_on, notice_id, status, created_by, created_at, updated_at) VALUES (?, ?, ?, 1.0, ?, ?, ?, ?, NOW(), NOW())');
         $stmt->execute([$employeeId, $occurredOn, $fiscalYear, $expiresOn, $noticeId, 'active', $actorId ?? Auth::id()]);
         $id = (int)$pdo->lastInsertId();

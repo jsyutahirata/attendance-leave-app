@@ -5,6 +5,10 @@
   <article class="metric accent"><span>代休残数</span><strong><?= number_format($compSummary['available'], 1) ?><small>日</small></strong></article>
 </section>
 <div class="two-col">
+  <section class="panel"><h2>代休予定・履歴（直近20件）</h2><div class="table-wrap"><table><thead><tr><th>取得日</th><th>日数</th><th>状態</th></tr></thead><tbody>
+    <?php foreach ($compEntries as $entry): ?><tr><td><?= e($entry['leave_date']) ?></td><td><?= number_format((float)$entry['days'], 1) ?>日</td><td><?= $entry['status'] === 'taken' ? '取得済み' : '登録済み' ?></td></tr><?php endforeach; ?>
+    <?php if (!$compEntries): ?><tr><td colspan="3" class="empty">代休の予定・履歴はありません。</td></tr><?php endif; ?>
+  </tbody></table></div></section>
   <section class="panel"><h2>有給予定・履歴</h2><div class="table-wrap"><table><thead><tr><th>取得日</th><th>区分</th><th>状態</th></tr></thead><tbody>
     <?php foreach ($entries as $entry): $past = $entry['leave_date'] < date('Y-m-d'); ?><tr><td><?= e($entry['leave_date']) ?></td><td><?= e(['full'=>'1日','am'=>'午前休','pm'=>'午後休'][$entry['leave_type']]) ?></td><td><?= $entry['status']==='pending' ? '承認待ち' : ($past || $entry['status']==='taken' ? '取得済み' : '登録済み') ?></td></tr><?php endforeach; ?>
     <?php if (!$entries): ?><tr><td colspan="3" class="empty">有給の予定はありません。</td></tr><?php endif; ?>

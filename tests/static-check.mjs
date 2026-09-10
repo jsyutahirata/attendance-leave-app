@@ -29,14 +29,16 @@ for (const file of phpFiles) {
 const controller = await readFile(new URL('src/Controller.php', root), 'utf8');
 const layout = await readFile(new URL('views/layout.php', root), 'utf8');
 const schema = await readFile(new URL('database/schema.sql', root), 'utf8');
-for (const table of ['users','employees','leave_grants','leave_entries','leave_adjustments','attendance_events','attendance_notices','audit_logs','password_reset_tokens','remember_login_tokens','app_settings','push_subscriptions','push_preferences','push_notification_logs']) {
+for (const table of ['users','employees','leave_grants','leave_entries','leave_adjustments','attendance_events','attendance_notices','company_calendar_events','japanese_holidays','audit_logs','password_reset_tokens','remember_login_tokens','app_settings','push_subscriptions','push_preferences','push_notification_logs']) {
   if (!schema.includes(`CREATE TABLE ${table}`)) failures.push(`schema: missing ${table}`);
 }
 if ((schema.match(/grant_year SMALLINT/g) ?? []).length !== 2) failures.push('schema: leave grant year fields are incomplete');
-for (const route of ['login','leave/create','leave/cancel','attendance/clock','notice/create','admin/users/create','admin/leave/create','admin/leave/grant','admin/leave/review','admin/settings/approval','push/subscribe','push/unsubscribe','push/preferences','admin/attendance']) {
+if (!schema.includes('leave_renewal_month TINYINT')) failures.push('schema: employee leave renewal month is missing');
+for (const route of ['login','leave/create','leave/cancel','calendar/personal/create','attendance/clock','notice/create','admin/users/create','admin/users/update','admin/users/password-reset','admin/users/logout-all','admin/view-grants/all/create','admin/leave/create','admin/leave/grant','admin/leave/review','admin/leave/import/template','admin/leave/import/preview','admin/leave/import/confirm','admin/settings/approval','admin/calendar','admin/calendar/save','admin/calendar/delete','admin/calendar/import/preview','admin/calendar/import/confirm','admin/calendar/import/cancel','push/subscribe','push/unsubscribe','push/preferences','admin/attendance']) {
   if (!controller.includes(`'${route}'`)) failures.push(`controller: missing ${route}`);
 }
 if (!layout.includes('Csrf::field()')) failures.push('layout: logout is not CSRF protected');
+if (schema.includes('ip_address')) failures.push('schema: audit IP address must not be retained');
 for (const file of ['public/manifest.webmanifest','public/service-worker.js','public/assets/app.js']) {
   try { await readFile(new URL(file, root), 'utf8'); } catch { failures.push(`missing platform file: ${file}`); }
 }

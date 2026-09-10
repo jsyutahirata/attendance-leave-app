@@ -204,6 +204,17 @@ final class Auth
         $pdo->prepare('DELETE FROM remember_login_tokens WHERE user_id = ?')->execute([$userId]);
     }
 
+    /** 全アカウントのブラウザーセッションとログイン保持トークンを失効させる。 */
+    public static function revokeEverySession(): int
+    {
+        $pdo = Database::connection();
+        $userIds = $pdo->query('SELECT id FROM users')->fetchAll(\PDO::FETCH_COLUMN);
+        foreach ($userIds as $userId) {
+            self::revokeAllSessions((int)$userId);
+        }
+        return count($userIds);
+    }
+
     private static function issueRememberToken(int $userId): void
     {
         $selector = bin2hex(random_bytes(16));

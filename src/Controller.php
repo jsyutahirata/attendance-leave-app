@@ -17,7 +17,8 @@ final class Controller
                 'security' => 'securityPage',
                 'leave' => 'leavePage', 'notice' => 'noticePage', 'attendance' => 'attendancePage',
                 'viewable' => 'viewablePage', 'viewable/show' => 'viewableShow', 'sharing' => 'sharingPage',
-                'admin' => 'adminPage', 'admin/users' => 'adminUsers', 'admin/leave' => 'adminLeave', 'admin/attendance' => 'adminAttendance', 'admin/attendance/monthly' => 'adminAttendanceMonthly', 'admin/audit' => 'adminAudit', 'admin/access' => 'adminAccess',
+                'contact' => 'contactPage',
+                'admin' => 'adminPage', 'admin/users' => 'adminUsers', 'admin/leave' => 'adminLeave', 'admin/leave/import/template' => 'adminLeaveImportTemplate', 'admin/calendar' => 'adminCalendar', 'admin/attendance' => 'adminAttendance', 'admin/attendance/monthly' => 'adminAttendanceMonthly', 'admin/audit' => 'adminAudit', 'admin/access' => 'adminAccess',
             ],
             'POST' => [
                 'login' => 'login', 'login/totp' => 'totpVerify', 'logout' => 'logout', 'forgot-password' => 'forgot', 'reset-password' => 'reset',
@@ -26,14 +27,20 @@ final class Controller
                 'admin/users/totp-disable' => 'adminUserTotpDisable',
                 'leave/create' => 'leaveCreate', 'leave/cancel' => 'leaveCancel',
                 'comp-leave/create' => 'compLeaveCreate', 'comp-leave/cancel' => 'compLeaveCancel',
+                'calendar/personal/create' => 'personalCalendarCreate',
                 'notice/create' => 'noticeCreate', 'attendance/clock' => 'clock',
+                'contact' => 'contactSubmit',
                 'admin/attendance/export' => 'adminAttendanceExport',
                 'admin/comp-leave/grant-cancel' => 'adminCompGrantCancel',
                 'sharing/add' => 'sharingAdd', 'sharing/remove' => 'sharingRemove',
                 'admin/groups/create' => 'adminGroupCreate', 'admin/groups/add-member' => 'adminGroupAddMember', 'admin/groups/remove-member' => 'adminGroupRemoveMember', 'admin/groups/delete' => 'adminGroupDelete',
-                'admin/view-grants/create' => 'adminViewGrantCreate', 'admin/view-grants/delete' => 'adminViewGrantDelete',
-                'admin/users/create' => 'adminUserCreate', 'admin/users/toggle' => 'adminUserToggle', 'admin/users/force-logout' => 'adminUserForceLogout',
+                'admin/view-grants/create' => 'adminViewGrantCreate', 'admin/view-grants/all/create' => 'adminAllViewGrantCreate', 'admin/view-grants/delete' => 'adminViewGrantDelete',
+                'admin/users/create' => 'adminUserCreate', 'admin/users/update' => 'adminUserUpdate', 'admin/users/toggle' => 'adminUserToggle', 'admin/users/force-logout' => 'adminUserForceLogout',
+                'admin/users/password-reset' => 'adminUserPasswordReset', 'admin/users/logout-all' => 'adminUsersLogoutAll',
                 'admin/leave/create' => 'adminLeaveCreate', 'admin/leave/grant' => 'adminGrant', 'admin/leave/adjust' => 'adminAdjust', 'admin/leave/cancel' => 'adminLeaveCancel', 'admin/leave/review' => 'adminLeaveReview',
+                'admin/leave/import/preview' => 'adminLeaveImportPreview', 'admin/leave/import/confirm' => 'adminLeaveImportConfirm', 'admin/leave/import/cancel' => 'adminLeaveImportCancel',
+                'admin/calendar/save' => 'adminCalendarSave', 'admin/calendar/delete' => 'adminCalendarDelete',
+                'admin/calendar/import/preview' => 'adminCalendarImportPreview', 'admin/calendar/import/confirm' => 'adminCalendarImportConfirm', 'admin/calendar/import/cancel' => 'adminCalendarImportCancel',
                 'admin/settings/approval' => 'adminApprovalSetting',
             ],
         ];
@@ -88,7 +95,7 @@ final class Controller
 
     // ---- 二要素認証（TOTP）設定：本人（§5）----
 
-    /** セキュリティ設定画面。TOTPの状態、セットアップ中のQR・バックアップコード、有効/無効操作を表示。 */
+    /** 設定画面。表示テーマ、通知、TOTPの状態と各種操作を表示。 */
     private function securityPage(): void
     {
         $user = Auth::user();
@@ -100,7 +107,7 @@ final class Controller
             $qrSvg = Totp::qrSvg($uri);
         }
         render('security', [
-            'title' => 'セキュリティ設定',
+            'title' => '設定',
             'enabled' => $enabled,
             'setup' => $setup,
             'qrSvg' => $qrSvg,
@@ -253,13 +260,13 @@ final class Controller
             $pdo->prepare('DELETE FROM password_reset_tokens WHERE user_id = ?')->execute([$userId]);
             $pdo->prepare('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 60 MINUTE), NOW())')->execute([$userId, $hash]);
             $link = rtrim((string)config('APP_URL'), '/') . url('reset-password') . '&token=' . urlencode($token);
-            $subject = 'パスワード再設定';
-            $body = "以下のURLから60分以内にパスワードを再設定してください。\n\n" . $link;
-            $headers = 'From: ' . (string)config('MAIL_FROM_NAME', '勤怠管理') . ' <' . (string)config('MAIL_FROM', 'no-reply@localhost') . '>';
-            mail($email, mb_encode_mimeheader($subject), $body, $headers);
+            if (!PasswordMail::send($email, $link)) {
+                $pdo->prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?')->execute([$hash]);
+                error_log('Password reset mail submission failed for user ' . (int)$userId);
+            }
             Audit::log('password_reset_requested', 'user', (int)$userId, null, null, (int)$userId);
         }
-        flash('success', '登録済みのアドレスの場合、再設定メールを送信しました。');
+        flash('success', '再設定を受け付けました。登録済みのアドレスをご確認ください。届かない場合は迷惑メールフォルダを確認するか、管理者へお問い合わせください。');
         redirect('forgot-password');
     }
 
@@ -272,18 +279,19 @@ final class Controller
     {
         $token = (string)($_POST['token'] ?? '');
         $password = (string)($_POST['password'] ?? '');
-        if (mb_strlen($password) < 12) {
-            flash('error', 'パスワードは12文字以上で入力してください。');
+        if (mb_strlen($password) < 8) {
+            flash('error', 'パスワードは8文字以上で入力してください。');
             header('Location: ' . url('reset-password') . '&token=' . urlencode($token)); exit;
         }
         $pdo = Database::connection();
-        $stmt = $pdo->prepare('SELECT * FROM password_reset_tokens WHERE token_hash = ? AND expires_at >= NOW() AND used_at IS NULL LIMIT 1');
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare('SELECT * FROM password_reset_tokens WHERE token_hash = ? AND expires_at >= NOW() AND used_at IS NULL LIMIT 1 FOR UPDATE');
         $stmt->execute([hash('sha256', $token)]);
         $row = $stmt->fetch();
         if (!$row) {
+            $pdo->rollBack();
             flash('error', '再設定URLが無効または期限切れです。'); redirect('forgot-password');
         }
-        $pdo->beginTransaction();
         $pdo->prepare('UPDATE users SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL WHERE id = ?')->execute([password_hash($password, PASSWORD_DEFAULT), $row['user_id']]);
         // パスワード変更時は当該ユーザーの全端末セッション・長期トークンを一括失効させる（§5）。
         Auth::revokeAllSessions((int)$row['user_id']);
@@ -297,6 +305,15 @@ final class Controller
     {
         $pdo = Database::connection();
         $employeeId = (int)Auth::employeeId();
+        // 入社月による有給の自動付与を、ログイン中は1日1回だけ判定・実行する（冪等）。
+        if (($_SESSION['leave_accrued_on'] ?? '') !== date('Y-m-d')) {
+            try {
+                LeaveAccrualService::accrueForEmployee($employeeId);
+                $_SESSION['leave_accrued_on'] = date('Y-m-d');
+            } catch (\Throwable $e) {
+                error_log('Leave accrual on dashboard failed for employee ' . $employeeId . ': ' . $e->getMessage());
+            }
+        }
         $summary = LeaveService::summary($employeeId);
         $stmt = $pdo->prepare("SELECT * FROM leave_entries WHERE employee_id = ? AND status IN ('pending','registered','approved') AND leave_date >= CURDATE() ORDER BY leave_date LIMIT 5");
         $stmt->execute([$employeeId]);
@@ -306,7 +323,9 @@ final class Controller
         $lastEvent = $stmt->fetch() ?: null;
         $stmt = $pdo->prepare('SELECT * FROM attendance_notices WHERE employee_id = ? ORDER BY target_date DESC, id DESC LIMIT 5');
         $stmt->execute([$employeeId]);
-        render('dashboard', compact('summary', 'upcoming', 'lastEvent') + ['notices' => $stmt->fetchAll(), 'compSummary' => CompLeaveService::summary($employeeId), 'title' => 'ホーム']);
+        $month = CompanyCalendarService::normalizeMonth((string)($_GET['month'] ?? ''));
+        $addDate = $this->validCalendarAddDate((string)($_GET['add_date'] ?? ''));
+        render('dashboard', compact('summary', 'upcoming', 'lastEvent') + ['notices' => $stmt->fetchAll(), 'compSummary' => CompLeaveService::summary($employeeId), 'calendar' => CompanyCalendarService::calendar($employeeId, $month), 'calendarAddDate' => $addDate, 'title' => 'ホーム']);
     }
 
     private function leavePage(): void
@@ -316,7 +335,11 @@ final class Controller
         $stmt->execute([$employeeId]);
         $compStmt = Database::connection()->prepare("SELECT * FROM comp_leave_entries WHERE employee_id = ? ORDER BY leave_date DESC, id DESC");
         $compStmt->execute([$employeeId]);
-        render('leave', ['title' => '有給管理', 'summary' => LeaveService::summary($employeeId), 'entries' => $stmt->fetchAll(), 'compSummary' => CompLeaveService::summary($employeeId), 'compEntries' => $compStmt->fetchAll()]);
+        $noticeStmt = Database::connection()->prepare('SELECT * FROM attendance_notices WHERE employee_id = ? ORDER BY target_date DESC, id DESC LIMIT 100');
+        $noticeStmt->execute([$employeeId]);
+        $month = CompanyCalendarService::normalizeMonth((string)($_GET['month'] ?? ''));
+        $addDate = $this->validCalendarAddDate((string)($_GET['add_date'] ?? ''));
+        render('leave', ['title' => '休暇・勤怠連絡', 'summary' => LeaveService::summary($employeeId), 'entries' => $stmt->fetchAll(), 'compSummary' => CompLeaveService::summary($employeeId), 'compEntries' => $compStmt->fetchAll(), 'notices' => $noticeStmt->fetchAll(), 'calendar' => CompanyCalendarService::calendar($employeeId, $month), 'calendarAddDate' => $addDate]);
     }
 
     private function compLeaveCreate(): void
@@ -364,35 +387,125 @@ final class Controller
 
     private function noticeCreate(): void
     {
+        try {
+            flash('success', $this->createAttendanceNotice($_POST));
+        } catch (\Throwable $e) {
+            flash('error', $e instanceof DomainException ? $e->getMessage() : '勤怠連絡を登録できませんでした。');
+        }
+        redirect('leave');
+    }
+
+    private function contactPage(): void
+    {
+        render('contact', ['title' => '問い合わせ', 'configured' => ContactService::configured()]);
+    }
+
+    private function contactSubmit(): void
+    {
+        try {
+            ContactService::send((array)Auth::user(), (string)($_POST['category'] ?? ''), (string)($_POST['body'] ?? ''));
+            Audit::log('contact_sent', 'user', Auth::id(), null, ['category' => (string)($_POST['category'] ?? '')]);
+            flash('success', '問い合わせを送信しました。担当者からの連絡をお待ちください。');
+        } catch (DomainException $e) {
+            flash('error', $e->getMessage());
+        } catch (\Throwable $e) {
+            error_log('Contact submit failed: ' . $e->getMessage());
+            flash('error', '問い合わせを送信できませんでした。時間をおいて再度お試しください。');
+        }
+        redirect('contact');
+    }
+
+    private function personalCalendarCreate(): void
+    {
+        $jsonResponse = (string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'calendar-entry';
+        try {
+            $kind = (string)($_POST['entry_kind'] ?? '');
+            $input = $_POST;
+            $input['leave_date'] = (string)($_POST['entry_date'] ?? '');
+            $input['target_date'] = (string)($_POST['entry_date'] ?? '');
+            if ($kind === 'leave') {
+                LeaveService::create((int)Auth::employeeId(), $input);
+                $message = '有給予定を登録しました。';
+            } elseif ($kind === 'comp_leave') {
+                $input['note'] = (string)($_POST['comp_note'] ?? '');
+                CompLeaveService::createEntry((int)Auth::employeeId(), $input);
+                $message = '代休の取得予定を登録しました。';
+            } elseif ($kind === 'notice') {
+                $message = $this->createAttendanceNotice($input);
+            } else {
+                throw new DomainException('予定の種類を選択してください。');
+            }
+            if (!$jsonResponse) {
+                flash('success', $message);
+                $this->redirectToPersonalCalendar((string)($_POST['return_route'] ?? ''), (string)($_POST['entry_date'] ?? ''));
+            }
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => true, 'message' => $message], JSON_UNESCAPED_UNICODE);
+        } catch (\Throwable $e) {
+            $message = $e instanceof DomainException ? $e->getMessage() : '予定を登録できませんでした。';
+            if (!$jsonResponse) {
+                flash('error', $message);
+                $this->redirectToPersonalCalendar((string)($_POST['return_route'] ?? ''), (string)($_POST['entry_date'] ?? ''));
+            }
+            http_response_code(422);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode([
+                'ok' => false,
+                'message' => $message,
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+    private function validCalendarAddDate(string $date): string
+    {
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+        return $parsed && $parsed->format('Y-m-d') === $date ? $date : '';
+    }
+
+    private function redirectToPersonalCalendar(string $route, string $date): never
+    {
+        $route = $route === 'leave' ? 'leave' : '';
+        $month = preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) ? substr($date, 0, 7) : date('Y-m');
+        $location = url($route);
+        header('Location: ' . $location . (str_contains($location, '?') ? '&' : '?') . 'month=' . rawurlencode($month));
+        exit;
+    }
+
+    private function createAttendanceNotice(array $input): string
+    {
         $types = ['late', 'early', 'leave_full', 'leave_am', 'leave_pm', 'absence', 'holiday_work', 'medical', 'other'];
-        $type = (string)($_POST['notice_type'] ?? '');
-        $date = (string)($_POST['target_date'] ?? '');
+        $type = (string)($input['notice_type'] ?? '');
+        $date = (string)($input['target_date'] ?? '');
         if (!in_array($type, $types, true) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-            flash('error', '対象日と勤怠種別を正しく入力してください。'); redirect('notice');
+            throw new DomainException('対象日と勤怠種別を正しく入力してください。');
         }
         $pdo = Database::connection();
         $pdo->beginTransaction();
         try {
             $leaveEntryId = null;
+            if ($type === 'holiday_work') {
+                $lock = $pdo->prepare('SELECT id FROM employees WHERE id = ? FOR UPDATE');
+                $lock->execute([Auth::employeeId()]);
+            }
             $leaveMap = ['leave_full' => 'full', 'leave_am' => 'am', 'leave_pm' => 'pm'];
             if (isset($leaveMap[$type])) {
-                $leaveEntryId = LeaveService::create((int)Auth::employeeId(), ['leave_date' => $date, 'leave_type' => $leaveMap[$type], 'note' => $_POST['details'] ?? '', 'confirmed_with' => $_POST['confirmed_with'] ?? '']);
+                $leaveEntryId = LeaveService::create((int)Auth::employeeId(), ['leave_date' => $date, 'leave_type' => $leaveMap[$type], 'note' => $input['details'] ?? '', 'confirmed_with' => $input['confirmed_with'] ?? '']);
             }
             $stmt = $pdo->prepare('INSERT INTO attendance_notices (employee_id, target_date, notice_type, expected_start, expected_end, details, leave_entry_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())');
-            $stmt->execute([Auth::employeeId(), $date, $type, $_POST['expected_start'] ?: null, $_POST['expected_end'] ?: null, trim((string)($_POST['details'] ?? '')), $leaveEntryId, Auth::id()]);
+            $expectedStart = trim((string)($input['expected_start'] ?? '')) ?: null;
+            $expectedEnd = trim((string)($input['expected_end'] ?? '')) ?: null;
+            $stmt->execute([Auth::employeeId(), $date, $type, $expectedStart, $expectedEnd, trim((string)($input['details'] ?? '')), $leaveEntryId, Auth::id()]);
             $noticeId = (int)$pdo->lastInsertId();
             Audit::log('attendance_notice_created', 'attendance_notice', $noticeId, null, ['type' => $type, 'date' => $date]);
             // 休日出勤は代休1日分を同一トランザクション内で自動発生させる（§7.8）。
-            if ($type === 'holiday_work') {
-                CompLeaveService::generateForHolidayWork((int)Auth::employeeId(), $date, $noticeId);
-            }
+            $grantId = $type === 'holiday_work'
+                ? CompLeaveService::generateForHolidayWork((int)Auth::employeeId(), $date, $noticeId) : 0;
             $pdo->commit();
-            flash('success', $type === 'holiday_work' ? '勤怠連絡を登録し、代休1日を付与しました。' : '勤怠連絡を登録しました。');
+            return $grantId > 0 ? '勤怠連絡を登録し、代休1日を付与しました。' : '勤怠連絡を登録しました。';
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
-            flash('error', $e instanceof DomainException ? $e->getMessage() : '勤怠連絡を登録できませんでした。');
+            throw $e;
         }
-        redirect('notice');
     }
 
     private function attendancePage(): void
@@ -422,6 +535,8 @@ final class Controller
         if (!in_array($eventType, ['clock_in', 'clock_out'], true)) { flash('error', '不正な操作です。'); redirect('attendance'); }
         $pdo = Database::connection();
         $pdo->beginTransaction();
+        $lock = $pdo->prepare('SELECT id FROM employees WHERE id = ? FOR UPDATE');
+        $lock->execute([Auth::employeeId()]);
         $stmt = $pdo->prepare('SELECT * FROM attendance_events WHERE employee_id = ? ORDER BY occurred_at DESC, id DESC LIMIT 1 FOR UPDATE');
         $stmt->execute([Auth::employeeId()]);
         $last = $stmt->fetch();
@@ -429,10 +544,17 @@ final class Controller
         if ($eventType !== $expected) {
             $pdo->rollBack(); flash('error', $eventType === 'clock_in' ? 'すでに出勤中です。' : '先に出勤打刻が必要です。'); redirect('attendance');
         }
-        $stmt = $pdo->prepare('INSERT INTO attendance_events (employee_id, event_type, occurred_at, created_by, created_at) VALUES (?, ?, NOW(), ?, NOW())');
-        $stmt->execute([Auth::employeeId(), $eventType, Auth::id()]);
-        Audit::log($eventType, 'attendance_event', (int)$pdo->lastInsertId(), null, ['occurred_at' => date('Y-m-d H:i:s')]);
-        $pdo->commit(); flash('success', $eventType === 'clock_in' ? '出勤を記録しました。' : '退勤を記録しました。'); redirect('attendance');
+        $now = new \DateTimeImmutable();
+        $stmt = $pdo->prepare('INSERT INTO attendance_events (employee_id, event_type, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, NOW())');
+        $stmt->execute([Auth::employeeId(), $eventType, $now->format('Y-m-d H:i:s'), Auth::id()]);
+        Audit::log($eventType, 'attendance_event', (int)$pdo->lastInsertId(), null, ['occurred_at' => $now->format('Y-m-d H:i:s')]);
+        $grantId = 0;
+        if ($eventType === 'clock_in' && (int)$now->format('N') >= 6) {
+            $grantId = CompLeaveService::generateForHolidayWork((int)Auth::employeeId(), $now->format('Y-m-d'), null);
+        }
+        $pdo->commit();
+        flash('success', ($eventType === 'clock_in' ? '出勤を記録しました。' : '退勤を記録しました。') . ($grantId > 0 ? '土日の出勤につき代休1日を付与しました。' : ''));
+        redirect('attendance');
     }
 
     private function adminPage(): void
@@ -451,8 +573,17 @@ final class Controller
     private function adminUsers(): void
     {
         Auth::requireAdmin();
-        $users = Database::connection()->query('SELECT u.*, e.full_name, e.employee_code, e.hired_on FROM users u JOIN employees e ON e.id = u.employee_id ORDER BY e.full_name')->fetchAll();
-        render('admin/users', ['title' => '社員管理', 'users' => $users]);
+        $pdo = Database::connection();
+        $users = $pdo->query('SELECT u.*, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month FROM users u JOIN employees e ON e.id = u.employee_id ORDER BY e.full_name')->fetchAll();
+        $editUser = null;
+        $editId = (int)($_GET['edit'] ?? 0);
+        if ($editId > 0) {
+            $stmt = $pdo->prepare('SELECT u.*, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?');
+            $stmt->execute([$editId]);
+            $editUser = $stmt->fetch() ?: null;
+            if ($editUser === null) flash('error', '編集対象の社員が見つかりません。');
+        }
+        render('admin/users', ['title' => '社員管理', 'users' => $users, 'editUser' => $editUser]);
     }
 
     private function adminUserCreate(): void
@@ -460,14 +591,17 @@ final class Controller
         Auth::requireAdmin();
         $email = mb_strtolower(trim((string)($_POST['email'] ?? '')));
         $name = trim((string)($_POST['full_name'] ?? ''));
+        $renewalMonthInput = trim((string)($_POST['leave_renewal_month'] ?? ''));
+        $renewalMonth = $renewalMonthInput === '' ? 0 : (ctype_digit($renewalMonthInput) ? (int)$renewalMonthInput : -1);
         if (!filter_var($email, FILTER_VALIDATE_EMAIL) || $name === '') {
             flash('error', '氏名と正しいメールアドレスを入力してください。'); redirect('admin/users');
         }
+        if ($renewalMonth < 0 || $renewalMonth > 12) { flash('error', '有給更新月は1〜12で入力してください。'); redirect('admin/users'); }
         $temporaryPassword = bin2hex(random_bytes(32));
         $pdo = Database::connection(); $pdo->beginTransaction();
         try {
-            $stmt = $pdo->prepare('INSERT INTO employees (employee_code, full_name, hired_on, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())');
-            $stmt->execute([trim((string)($_POST['employee_code'] ?? '')) ?: null, $name, ($_POST['hired_on'] ?? '') ?: null]);
+            $stmt = $pdo->prepare('INSERT INTO employees (employee_code, full_name, hired_on, leave_renewal_month, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())');
+            $stmt->execute([trim((string)($_POST['employee_code'] ?? '')) ?: null, $name, ($_POST['hired_on'] ?? '') ?: null, $renewalMonth ?: null]);
             $employeeId = (int)$pdo->lastInsertId();
             $stmt = $pdo->prepare("INSERT INTO users (employee_id, email, password_hash, role, status, session_token, failed_login_attempts, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, 0, NOW(), NOW())");
             $stmt->execute([$employeeId, $email, password_hash($temporaryPassword, PASSWORD_DEFAULT), ($_POST['role'] ?? '') === 'admin' ? 'admin' : 'employee', bin2hex(random_bytes(16))]);
@@ -477,13 +611,79 @@ final class Controller
             Audit::log('account_created', 'user', $userId, null, ['email' => $email, 'employee_id' => $employeeId]);
             $pdo->commit();
             $link = rtrim((string)config('APP_URL'), '/') . url('reset-password') . '&token=' . urlencode($token);
-            $subject = '社内勤怠管理アカウントのご案内';
-            $body = "アカウントが作成されました。以下のURLから24時間以内にパスワードを設定してください。\n\n" . $link;
-            $headers = 'From: ' . (string)config('MAIL_FROM_NAME', '勤怠管理') . ' <' . (string)config('MAIL_FROM', 'no-reply@localhost') . '>';
-            $sent = mail($email, mb_encode_mimeheader($subject), $body, $headers);
+            $sent = PasswordMail::sendInvite($email, $link);
             flash($sent ? 'success' : 'error', $sent ? '社員アカウントを作成し、招待メールを送信しました。' : 'アカウントは作成しましたが、招待メールを送信できませんでした。本人にパスワード再設定を試してもらってください。');
         } catch (\Throwable $e) {
             $pdo->rollBack(); flash('error', 'アカウントを作成できませんでした。メールアドレスや社員番号の重複を確認してください。');
+        }
+        redirect('admin/users');
+    }
+
+    private function adminUserUpdate(): void
+    {
+        Auth::requireAdmin();
+        $id = (int)($_POST['user_id'] ?? 0);
+        $name = trim((string)($_POST['full_name'] ?? ''));
+        $employeeCode = trim((string)($_POST['employee_code'] ?? ''));
+        $email = mb_strtolower(trim((string)($_POST['email'] ?? '')));
+        $hiredOn = trim((string)($_POST['hired_on'] ?? ''));
+        $renewalMonthInput = trim((string)($_POST['leave_renewal_month'] ?? ''));
+        $renewalMonth = $renewalMonthInput === '' ? 0 : (ctype_digit($renewalMonthInput) ? (int)$renewalMonthInput : -1);
+        $role = (string)($_POST['role'] ?? '');
+        $status = (string)($_POST['status'] ?? '');
+        if ($id < 1 || $name === '' || mb_strlen($name) > 100 || mb_strlen($employeeCode) > 50 || mb_strlen($email) > 255 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            flash('error', '氏名・社員番号・メールアドレスを確認してください。'); redirect('admin/users');
+        }
+        if (!in_array($role, ['employee', 'admin'], true) || !in_array($status, ['active', 'disabled', 'suspended'], true)) {
+            flash('error', '権限または在籍状態が正しくありません。'); redirect('admin/users');
+        }
+        if ($renewalMonth < 0 || $renewalMonth > 12) { flash('error', '有給更新月は1〜12で入力してください。'); redirect('admin/users'); }
+        if ($hiredOn !== '') {
+            $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $hiredOn);
+            if (!$date || $date->format('Y-m-d') !== $hiredOn) { flash('error', '入社日を正しく入力してください。'); redirect('admin/users'); }
+        }
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare('SELECT u.id, u.employee_id, u.email, u.role, u.status, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?');
+        $stmt->execute([$id]); $before = $stmt->fetch();
+        if (!$before) { flash('error', '対象の社員が見つかりません。'); redirect('admin/users'); }
+        if ($id === Auth::id() && ($role !== 'admin' || $status !== 'active')) {
+            flash('error', '自分自身の管理者権限と有効状態は変更できません。'); redirect('admin/users');
+        }
+        $employeeCode = $employeeCode === '' ? null : $employeeCode;
+        $hiredOn = $hiredOn === '' ? null : $hiredOn;
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM users WHERE email = ? AND id <> ?'); $stmt->execute([$email, $id]);
+        if ((int)$stmt->fetchColumn() > 0) { flash('error', 'そのメールアドレスは別の社員が使用しています。'); redirect('admin/users'); }
+        if ($employeeCode !== null) {
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM employees WHERE employee_code = ? AND id <> ?'); $stmt->execute([$employeeCode, (int)$before['employee_id']]);
+            if ((int)$stmt->fetchColumn() > 0) { flash('error', 'その社員番号は別の社員が使用しています。'); redirect('admin/users'); }
+        }
+        if ($before['role'] === 'admin' && $before['status'] === 'active' && ($role !== 'admin' || $status !== 'active')) {
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active' AND id <> ?"); $stmt->execute([$id]);
+            if ((int)$stmt->fetchColumn() < 1) { flash('error', '有効な管理者が0人になるため、この変更はできません。'); redirect('admin/users'); }
+        }
+        $after = ['full_name' => $name, 'employee_code' => $employeeCode, 'hired_on' => $hiredOn, 'leave_renewal_month' => $renewalMonth ?: null, 'email' => $email, 'role' => $role, 'status' => $status];
+        $beforeAudit = array_intersect_key($before, $after);
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare('UPDATE employees SET full_name = ?, employee_code = ?, hired_on = ?, leave_renewal_month = ?, updated_at = NOW() WHERE id = ?')->execute([$name, $employeeCode, $hiredOn, $renewalMonth ?: null, (int)$before['employee_id']]);
+            $pdo->prepare('UPDATE users SET email = ?, role = ?, status = ?, updated_at = NOW() WHERE id = ?')->execute([$email, $role, $status, $id]);
+            $emailOrRoleChanged = $email !== $before['email'] || $role !== $before['role'];
+            $becameInactive = $status !== 'active' && $before['status'] === 'active';
+            if (($emailOrRoleChanged && $id !== Auth::id()) || $becameInactive) Auth::revokeAllSessions($id);
+            if ($status !== 'active') {
+                $pdo->prepare('DELETE FROM password_reset_tokens WHERE user_id = ? AND used_at IS NULL')->execute([$id]);
+                $pdo->prepare('DELETE FROM push_subscriptions WHERE user_id = ?')->execute([$id]);
+            }
+            if ($status === 'disabled' && $before['status'] !== 'disabled') {
+                $employeeId = (int)$before['employee_id'];
+                $pdo->prepare('DELETE FROM view_grants WHERE viewer_employee_id = ? OR target_employee_id = ?')->execute([$employeeId, $employeeId]);
+                $pdo->prepare('DELETE FROM group_memberships WHERE employee_id = ?')->execute([$employeeId]);
+            }
+            Audit::log('account_updated', 'user', $id, $beforeAudit, $after);
+            $pdo->commit(); flash('success', '社員情報を更新しました。');
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            flash('error', '社員情報を更新できませんでした。入力内容の重複を確認してください。');
         }
         redirect('admin/users');
     }
@@ -544,6 +744,63 @@ final class Controller
         redirect('admin/users');
     }
 
+    private function adminUserPasswordReset(): void
+    {
+        Auth::requireAdmin();
+        $id = (int)($_POST['user_id'] ?? 0);
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare("SELECT u.id, u.email, u.status, e.full_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?");
+        $stmt->execute([$id]);
+        $user = $stmt->fetch();
+        if (!$user) { flash('error', '対象の社員が見つかりません。'); redirect('admin/users'); }
+        if ($user['status'] !== 'active') { flash('error', '有効なアカウントにだけ再設定メールを送信できます。'); redirect('admin/users'); }
+
+        $token = bin2hex(random_bytes(32));
+        $hash = hash('sha256', $token);
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare('DELETE FROM password_reset_tokens WHERE user_id = ? AND used_at IS NULL')->execute([$id]);
+            $pdo->prepare('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 60 MINUTE), NOW())')->execute([$id, $hash]);
+            // 管理者によるリセットは緊急対応も兼ねるため、メール発行時点で対象者を全端末から失効させる。
+            Auth::revokeAllSessions($id);
+            Audit::log('password_reset_requested_by_admin', 'user', $id, null, ['email' => $user['email']]);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+
+        $link = rtrim((string)config('APP_URL'), '/') . url('reset-password') . '&token=' . urlencode($token);
+        if (!PasswordMail::send((string)$user['email'], $link)) {
+            $pdo->prepare('DELETE FROM password_reset_tokens WHERE token_hash = ?')->execute([$hash]);
+            flash('error', '対象社員は全端末からログアウトしましたが、再設定メールを送信できませんでした。メール設定を確認して再実行してください。');
+        } else {
+            flash('success', $user['full_name'] . 'さんを全端末からログアウトし、60分有効のパスワード再設定メールを送信しました。');
+        }
+        redirect('admin/users');
+    }
+
+    private function adminUsersLogoutAll(): void
+    {
+        Auth::requireAdmin();
+        $actorId = (int)Auth::id();
+        $pdo = Database::connection();
+        $pdo->beginTransaction();
+        try {
+            Audit::log('force_logout_all', 'users', null, null, null, $actorId);
+            $count = Auth::revokeEverySession();
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+
+        Auth::logout(false);
+        session_start();
+        flash('success', $count . 'アカウントの全端末をログアウトしました。');
+        redirect('login');
+    }
+
     private function adminLeave(): void
     {
         Auth::requireAdmin(); $pdo = Database::connection();
@@ -556,7 +813,140 @@ final class Controller
         unset($employee);
         $compGrants = $pdo->query('SELECT g.*, e.full_name FROM comp_leave_grants g JOIN employees e ON e.id=g.employee_id ORDER BY g.occurred_on DESC, g.id DESC LIMIT 300')->fetchAll();
         $compEntries = $pdo->query('SELECT ce.*, e.full_name FROM comp_leave_entries ce JOIN employees e ON e.id=ce.employee_id ORDER BY ce.leave_date DESC, ce.id DESC LIMIT 300')->fetchAll();
-        render('admin/leave', ['title' => '有給管理（管理者）', 'employees' => $employees, 'entries' => $entries, 'compGrants' => $compGrants, 'compEntries' => $compEntries, 'approvalRequired' => Settings::bool('leave_approval_required', true)]);
+        render('admin/leave', ['title' => '有給管理（管理者）', 'employees' => $employees, 'entries' => $entries, 'compGrants' => $compGrants, 'compEntries' => $compEntries, 'approvalRequired' => Settings::bool('leave_approval_required', true), 'importPreview' => $_SESSION['leave_import_preview'] ?? null]);
+    }
+
+    private function adminLeaveImportTemplate(): void
+    {
+        Auth::requireAdmin();
+        header('Content-Type: text/csv; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="leave_balance_import_template.csv"');
+        $output = fopen('php://output', 'wb');
+        fwrite($output, "\xEF\xBB\xBF");
+        fputcsv($output, ['氏名', '対象年度', '残日数', '付与日', '有効期限', '更新月', '備考'], ',', '"', '\\', "\r\n");
+        $exampleGrantDate = date('Y') . '-04-01';
+        $exampleExpiry = (new \DateTimeImmutable($exampleGrantDate))->modify('+2 years -1 day')->format('Y-m-d');
+        fputcsv($output, ['山田 太郎', date('Y'), '10.0', $exampleGrantDate, $exampleExpiry, '4', '運用開始時点の残数'], ',', '"', '\\', "\r\n");
+        fclose($output);
+        exit;
+    }
+
+    private function adminLeaveImportPreview(): void
+    {
+        Auth::requireAdmin();
+        try {
+            $_SESSION['leave_import_preview'] = LeaveImportService::preview($_FILES['csv_file'] ?? []);
+            flash('success', 'CSVを読み込みました。内容を確認して取り込みを確定してください。');
+        } catch (DomainException $e) {
+            unset($_SESSION['leave_import_preview']);
+            flash('error', $e->getMessage());
+        } catch (\Throwable $e) {
+            unset($_SESSION['leave_import_preview']);
+            flash('error', 'CSVを読み込めませんでした。ファイル形式を確認してください。');
+        }
+        redirect('admin/leave');
+    }
+
+    private function adminLeaveImportConfirm(): void
+    {
+        Auth::requireAdmin();
+        try {
+            $result = LeaveImportService::import((array)($_SESSION['leave_import_preview'] ?? []), (int)Auth::id());
+            unset($_SESSION['leave_import_preview']);
+            flash('success', "有給残数を{$result['imported']}件取り込みました。重複{$result['skipped']}件はスキップしました。");
+        } catch (DomainException $e) {
+            flash('error', $e->getMessage());
+        } catch (\Throwable $e) {
+            flash('error', '有給残数を取り込めませんでした。データは追加されていません。');
+        }
+        redirect('admin/leave');
+    }
+
+    private function adminLeaveImportCancel(): void
+    {
+        Auth::requireAdmin();
+        unset($_SESSION['leave_import_preview']);
+        flash('success', 'CSVの取り込み確認を取り消しました。');
+        redirect('admin/leave');
+    }
+
+    private function adminCalendar(): void
+    {
+        Auth::requireAdmin();
+        $month = CompanyCalendarService::normalizeMonth((string)($_GET['month'] ?? ''));
+        $editId = (int)($_GET['edit'] ?? 0);
+        $events = Database::connection()->query('SELECT * FROM company_calendar_events ORDER BY start_date DESC, start_time DESC, id DESC LIMIT 300')->fetchAll();
+        render('admin/calendar', [
+            'title' => '会社カレンダー設定',
+            'calendar' => CompanyCalendarService::companyCalendar($month),
+            'events' => $events,
+            'editEvent' => $editId > 0 ? CompanyCalendarService::find($editId) : null,
+            'holidaySyncAt' => HolidayService::lastSyncedAt(),
+            'importPreview' => $_SESSION['calendar_import_preview'] ?? null,
+        ]);
+    }
+
+    private function adminCalendarImportPreview(): void
+    {
+        Auth::requireAdmin();
+        try {
+            $_SESSION['calendar_import_preview'] = CalendarImportService::preview(
+                $_FILES['calendar_file'] ?? [],
+                (string)($_POST['calendar_sheet'] ?? '')
+            );
+            flash('success', 'Excelを読み込みました。内容を確認して取り込みを確定してください。');
+        } catch (DomainException $e) {
+            unset($_SESSION['calendar_import_preview']);
+            flash('error', $e->getMessage());
+        } catch (\Throwable $e) {
+            unset($_SESSION['calendar_import_preview']);
+            flash('error', 'Excelを読み込めませんでした。ファイル形式を確認してください。');
+        }
+        redirect('admin/calendar');
+    }
+
+    private function adminCalendarImportConfirm(): void
+    {
+        Auth::requireAdmin();
+        try {
+            $result = CalendarImportService::import((array)($_SESSION['calendar_import_preview'] ?? []), (int)Auth::id());
+            unset($_SESSION['calendar_import_preview']);
+            flash('success', "会社予定を{$result['imported']}件取り込みました。重複{$result['skipped']}件はスキップしました。");
+        } catch (DomainException $e) {
+            flash('error', $e->getMessage());
+        } catch (\Throwable $e) {
+            flash('error', '会社予定を取り込めませんでした。データは追加されていません。');
+        }
+        redirect('admin/calendar');
+    }
+
+    private function adminCalendarImportCancel(): void
+    {
+        Auth::requireAdmin();
+        unset($_SESSION['calendar_import_preview']);
+        flash('success', 'Excelの取り込み確認を取り消しました。');
+        redirect('admin/calendar');
+    }
+
+    private function adminCalendarSave(): void
+    {
+        Auth::requireAdmin();
+        try {
+            $editing = (int)($_POST['event_id'] ?? 0) > 0;
+            CompanyCalendarService::save($_POST);
+            flash('success', $editing ? '会社予定を更新しました。' : '会社予定を追加しました。');
+        } catch (DomainException $e) { flash('error', $e->getMessage()); }
+        redirect('admin/calendar');
+    }
+
+    private function adminCalendarDelete(): void
+    {
+        Auth::requireAdmin();
+        try {
+            CompanyCalendarService::delete((int)($_POST['event_id'] ?? 0));
+            flash('success', '会社予定を削除しました。');
+        } catch (DomainException $e) { flash('error', $e->getMessage()); }
+        redirect('admin/calendar');
     }
 
     private function adminCompGrantCancel(): void
@@ -574,8 +964,8 @@ final class Controller
         Auth::requireAdmin(); $days = (float)($_POST['days'] ?? 0);
         $grantedOn = (string)($_POST['granted_on'] ?? ''); $expiresOn = (string)($_POST['expires_on'] ?? ''); $reason = trim((string)($_POST['reason'] ?? ''));
         $grantYear = (int)($_POST['grant_year'] ?? date('Y'));
-        $carryoverLimit = ($grantYear + 1) . '-12-31';
-        if ($days <= 0 || $grantedOn === '' || $expiresOn === '' || $expiresOn < $grantedOn || $expiresOn > $carryoverLimit || $reason === '' || $grantYear < 2000 || $grantYear > (int)date('Y') + 1) { flash('error', '付与内容を正しく入力してください。有効期限は付与年度の翌年末までです。'); redirect('admin/leave'); }
+        $maximumExpiry = preg_match('/^\d{4}-\d{2}-\d{2}$/', $grantedOn) ? (new \DateTimeImmutable($grantedOn))->modify('+2 years -1 day')->format('Y-m-d') : '';
+        if ($days <= 0 || $grantedOn === '' || $expiresOn === '' || $expiresOn < $grantedOn || $maximumExpiry === '' || $expiresOn > $maximumExpiry || $reason === '' || $grantYear < 2000 || $grantYear > (int)date('Y') + 1) { flash('error', '付与内容を正しく入力してください。有効期限は付与日の2年後の前日までです。'); redirect('admin/leave'); }
         $pdo = Database::connection();
         $employeeId = (int)($_POST['employee_id'] ?? 0);
         $pdo->beginTransaction();
@@ -717,6 +1107,9 @@ final class Controller
         $stmt = $pdo->prepare('SELECT * FROM attendance_events WHERE employee_id = ? ORDER BY occurred_at DESC LIMIT 20');
         $stmt->execute([$employeeId]);
         $events = $stmt->fetchAll();
+        $stmt = $pdo->prepare("SELECT leave_date, days, status FROM comp_leave_entries WHERE employee_id = ? AND status IN ('registered', 'taken') ORDER BY leave_date DESC, id DESC LIMIT 20");
+        $stmt->execute([$employeeId]);
+        $compEntries = $stmt->fetchAll();
         $stmt = $pdo->prepare('SELECT * FROM attendance_notices WHERE employee_id = ? ORDER BY target_date DESC, id DESC LIMIT 20');
         $stmt->execute([$employeeId]);
         render('viewable_show', [
@@ -724,7 +1117,7 @@ final class Controller
             'employee' => $employee,
             'summary' => LeaveService::summary($employeeId),
             'compSummary' => CompLeaveService::summary($employeeId),
-            'entries' => $entries, 'events' => $events, 'notices' => $stmt->fetchAll(),
+            'entries' => $entries, 'compEntries' => $compEntries, 'events' => $events, 'notices' => $stmt->fetchAll(),
         ]);
     }
 
@@ -781,13 +1174,15 @@ final class Controller
     {
         Auth::requireAdmin();
         $pdo = Database::connection();
-        $employees = $pdo->query('SELECT e.id, e.full_name, e.employee_code FROM employees e JOIN users u ON u.employee_id=e.id ORDER BY e.full_name')->fetchAll();
+        $employees = $pdo->query('SELECT e.id, e.full_name, e.employee_code, u.role, u.status FROM employees e JOIN users u ON u.employee_id=e.id ORDER BY e.full_name')->fetchAll();
         $groups = $pdo->query('SELECT g.*, (SELECT COUNT(*) FROM group_memberships m WHERE m.group_id=g.id) AS member_count FROM employee_groups g ORDER BY g.name')->fetchAll();
         $members = $pdo->query('SELECT gm.group_id, gm.employee_id, e.full_name FROM group_memberships gm JOIN employees e ON e.id=gm.employee_id ORDER BY e.full_name')->fetchAll();
         $membersByGroup = [];
         foreach ($members as $m) { $membersByGroup[(int)$m['group_id']][] = $m; }
         $grants = $pdo->query("SELECT vg.*, ve.full_name AS viewer_emp_name, vgr.name AS viewer_grp_name, te.full_name AS target_emp_name, tgr.name AS target_grp_name FROM view_grants vg LEFT JOIN employees ve ON ve.id=vg.viewer_employee_id LEFT JOIN employee_groups vgr ON vgr.id=vg.viewer_group_id LEFT JOIN employees te ON te.id=vg.target_employee_id LEFT JOIN employee_groups tgr ON tgr.id=vg.target_group_id ORDER BY vg.id DESC")->fetchAll();
-        render('admin/access', ['title' => '閲覧権限・グループ', 'employees' => $employees, 'groups' => $groups, 'membersByGroup' => $membersByGroup, 'grants' => $grants]);
+        $allGrants = array_values(array_filter($grants, static fn(array $grant): bool => $grant['target_type'] === 'all'));
+        $specificGrants = array_values(array_filter($grants, static fn(array $grant): bool => $grant['target_type'] !== 'all'));
+        render('admin/access', ['title' => '閲覧権限・グループ', 'employees' => $employees, 'groups' => $groups, 'membersByGroup' => $membersByGroup, 'grants' => $specificGrants, 'allGrants' => $allGrants]);
     }
 
     private function adminGroupCreate(): void
@@ -861,6 +1256,34 @@ final class Controller
             Audit::log('view_grant_created', 'view_grant', (int)$pdo->lastInsertId(), null, ['viewer_type' => $viewerType, 'viewer_employee_id' => $viewerEmp, 'viewer_group_id' => $viewerGrp, 'target_type' => $targetType, 'target_employee_id' => $targetEmp, 'target_group_id' => $targetGrp]);
             flash('success', '閲覧権限を付与しました。');
         } catch (\Throwable $e) { flash('error', '閲覧権限を付与できませんでした。'); }
+        redirect('admin/access');
+    }
+
+    private function adminAllViewGrantCreate(): void
+    {
+        Auth::requireAdmin();
+        $employeeId = (int)($_POST['viewer_employee_id'] ?? 0);
+        $expires = trim((string)($_POST['expires_on'] ?? ''));
+        if ($employeeId < 1) { flash('error', '全閲覧権限を付与する社員を選んでください。'); redirect('admin/access'); }
+        if ($expires !== '') {
+            $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $expires);
+            if (!$date || $date->format('Y-m-d') !== $expires || $expires < date('Y-m-d')) {
+                flash('error', '有効期限は本日以降の日付を入力してください。'); redirect('admin/access');
+            }
+        }
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare("SELECT e.id FROM employees e JOIN users u ON u.employee_id=e.id WHERE e.id=? AND u.status='active'");
+        $stmt->execute([$employeeId]);
+        if (!$stmt->fetch()) { flash('error', '有効な社員が見つかりません。'); redirect('admin/access'); }
+        $stmt = $pdo->prepare("SELECT id FROM view_grants WHERE viewer_type='employee' AND viewer_employee_id=? AND target_type='all' AND (expires_on IS NULL OR expires_on >= CURDATE()) LIMIT 1");
+        $stmt->execute([$employeeId]);
+        if ($stmt->fetch()) { flash('error', 'この社員にはすでに有効な全閲覧権限があります。'); redirect('admin/access'); }
+        try {
+            $stmt = $pdo->prepare("INSERT INTO view_grants (viewer_type, viewer_employee_id, viewer_group_id, target_type, target_employee_id, target_group_id, expires_on, granted_by, created_at) VALUES ('employee', ?, NULL, 'all', NULL, NULL, ?, ?, NOW())");
+            $stmt->execute([$employeeId, $expires !== '' ? $expires : null, Auth::id()]);
+            Audit::log('all_view_grant_created', 'view_grant', (int)$pdo->lastInsertId(), null, ['viewer_employee_id' => $employeeId, 'target_type' => 'all', 'expires_on' => $expires !== '' ? $expires : null]);
+            flash('success', '全社員の閲覧権限を付与しました。');
+        } catch (\Throwable $e) { flash('error', '全閲覧権限を付与できませんでした。'); }
         redirect('admin/access');
     }
 

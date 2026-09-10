@@ -1,0 +1,13 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\database",
+    "\\database\\migrations",
+    "\\public",
+    "\\public\\assets",
+    "\\scripts",
+    "\\src"
+  ],
+  "SelectedNode": "\\src\\Auth.php",
+  "PreviewInSolutionExplorer": false
+}

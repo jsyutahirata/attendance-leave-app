@@ -11,21 +11,39 @@ final class LeaveService
     {
         $pdo = Database::connection();
         $today = date('Y-m-d');
-        $year = (int)date('Y');
+        $stmt = $pdo->prepare('SELECT leave_renewal_month FROM employees WHERE id = ?');
+        $stmt->execute([$employeeId]);
+        $renewalMonthValue = $stmt->fetchColumn();
+        $renewalConfigured = $renewalMonthValue !== false && $renewalMonthValue !== null;
+        $renewalMonth = (int)($renewalMonthValue ?: 1);
+        $currentGrantYear = (int)date('Y') - ((int)date('n') < $renewalMonth ? 1 : 0);
+        $previousGrantYear = $currentGrantYear - 1;
+        $stmt = $pdo->prepare("SELECT MAX(grant_year) FROM leave_adjustments WHERE employee_id = ? AND days_delta < 0 AND reason = 'CSV初期移行：初回付与前の前借'");
+        $stmt->execute([$employeeId]);
+        $advanceGrantYear = (int)$stmt->fetchColumn();
+        if ($advanceGrantYear > $currentGrantYear) {
+            $currentGrantYear = $advanceGrantYear;
+            $previousGrantYear = $currentGrantYear - 1;
+        }
         $stmt = $pdo->prepare('SELECT id, granted_on, grant_year, expires_on, days FROM leave_grants WHERE employee_id = ? AND granted_on <= CURDATE()');
         $stmt->execute([$employeeId]);
         $grants = array_map(static function (array $grant): array {
-            $carryoverLimit = ((int)$grant['grant_year'] + 1) . '-12-31';
             return $grant + [
-                'effective_expires_on' => min($grant['expires_on'], $carryoverLimit),
+                'effective_expires_on' => $grant['expires_on'],
                 'remaining' => (float)$grant['days'],
             ];
         }, $stmt->fetchAll());
+        foreach ($grants as $grant) {
+            if ((int)$grant['grant_year'] > $currentGrantYear && $grant['granted_on'] <= $today && $grant['effective_expires_on'] >= $today) {
+                $currentGrantYear = (int)$grant['grant_year'];
+                $previousGrantYear = $currentGrantYear - 1;
+            }
+        }
         usort($grants, static function (array $a, array $b): int {
-            // Company rule: consume the newest grant year first, then the
-            // grant with the earlier expiry within that year.
-            return [(int)$b['grant_year'], $a['effective_expires_on'], (int)$a['id']]
-                <=> [(int)$a['grant_year'], $b['effective_expires_on'], (int)$b['id']];
+            // 社内運用に合わせ、今期付与分から先に消化する。
+            $yearOrder = (int)$b['grant_year'] <=> (int)$a['grant_year'];
+            if ($yearOrder !== 0) return $yearOrder;
+            return [$a['effective_expires_on'], (int)$a['id']] <=> [$b['effective_expires_on'], (int)$b['id']];
         });
 
         // Replay taken leave against the grant that expired first. This keeps an
@@ -49,9 +67,9 @@ final class LeaveService
         $currentYearRemaining = 0.0;
         foreach ($grants as $grant) {
             if ($grant['effective_expires_on'] < $today) continue;
-            if ((int)$grant['grant_year'] === $year - 1) {
+            if ((int)$grant['grant_year'] === $previousGrantYear) {
                 $previousYearRemaining += $grant['remaining'];
-            } elseif ((int)$grant['grant_year'] === $year) {
+            } elseif ((int)$grant['grant_year'] === $currentGrantYear) {
                 $currentYearRemaining += $grant['remaining'];
             }
         }
@@ -59,18 +77,18 @@ final class LeaveService
         $stmt = $pdo->prepare('SELECT grant_year, COALESCE(SUM(days_delta), 0) AS days FROM leave_adjustments WHERE employee_id = ? GROUP BY grant_year');
         $stmt->execute([$employeeId]);
         foreach ($stmt->fetchAll() as $adjustment) {
-            if ((int)$adjustment['grant_year'] === $year - 1) {
+            if ((int)$adjustment['grant_year'] === $previousGrantYear) {
                 $previousYearRemaining += (float)$adjustment['days'];
-            } elseif ((int)$adjustment['grant_year'] === $year) {
+            } elseif ((int)$adjustment['grant_year'] === $currentGrantYear) {
                 $currentYearRemaining += (float)$adjustment['days'];
             }
         }
 
-        // If imported history has no matching grant, consume the older bucket first.
-        $fromPrevious = min(max($previousYearRemaining, 0.0), $unfundedTaken);
-        $previousYearRemaining -= $fromPrevious;
-        $unfundedTaken -= $fromPrevious;
-        $currentYearRemaining -= $unfundedTaken;
+        // If imported history has no matching grant, consume the current bucket first.
+        $fromCurrent = min(max($currentYearRemaining, 0.0), $unfundedTaken);
+        $currentYearRemaining -= $fromCurrent;
+        $unfundedTaken -= $fromCurrent;
+        $previousYearRemaining -= $unfundedTaken;
 
         $stmt = $pdo->prepare("SELECT COALESCE(SUM(days), 0) FROM leave_entries WHERE employee_id = ? AND status IN ('pending','registered','approved') AND leave_date >= CURDATE()");
         $stmt->execute([$employeeId]);
@@ -80,6 +98,13 @@ final class LeaveService
         $scheduledToCurrent = min(max($currentYearRemaining, 0.0), $scheduled);
         $forecastCurrentYear = $currentYearRemaining - $scheduledToCurrent;
         $forecastPreviousYear = $previousYearRemaining - ($scheduled - $scheduledToCurrent);
+        $renewalDate = new \DateTimeImmutable(sprintf('%04d-%02d-01', (int)date('Y'), $renewalMonth));
+        $todayDate = new \DateTimeImmutable($today);
+        // 更新日当日は新年度へ切り替わっているため、警告対象は翌年の更新日。
+        if ($renewalDate <= $todayDate) {
+            $renewalDate = $renewalDate->modify('+1 year');
+        }
+        $daysUntilRenewal = (int)$todayDate->diff($renewalDate)->format('%a');
         return [
             'current' => $current,
             'previous_year' => $previousYearRemaining,
@@ -88,6 +113,10 @@ final class LeaveService
             'forecast' => $current - $scheduled,
             'forecast_previous_year' => $forecastPreviousYear,
             'forecast_current_year' => $forecastCurrentYear,
+            // 更新日時点で前年繰越は対象年度外となる。60日前から画面通知に使用する。
+            'renewal_date' => $renewalDate->format('Y-m-d'),
+            'days_until_renewal' => $daysUntilRenewal,
+            'expiring_at_renewal' => $renewalConfigured ? max(0.0, $forecastPreviousYear) : 0.0,
         ];
     }
 
@@ -115,7 +144,9 @@ final class LeaveService
             if (!$stmt->fetch()) {
                 throw new DomainException('対象の社員が見つかりません。');
             }
-            if (self::summary($employeeId)['forecast'] < $days) {
+            // 前借（残数を超えた事前申請）を許可する運用では残数不足でブロックしない。
+            // 更新月などの付与予定を待つケースでも弾かれないようにするため既定は許可。
+            if (!Settings::bool('leave_allow_advance', true) && self::summary($employeeId)['forecast'] < $days) {
                 throw new DomainException('予定反映後の残数が不足しています。');
             }
             $stmt = $pdo->prepare("SELECT id FROM leave_entries WHERE employee_id = ? AND leave_date = ? AND status NOT IN ('cancelled','rejected') FOR UPDATE");

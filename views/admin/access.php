@@ -24,7 +24,27 @@
   </section>
 </div>
 
-<h2 class="section-title">閲覧権限</h2>
+<h2 class="section-title" id="all-view">全閲覧権限</h2>
+<section class="panel">
+  <h2>全社員を閲覧できる社員</h2>
+  <p class="muted">管理者にせず、全社員の有給・代休・打刻・勤怠連絡を読み取り専用で確認できるようにします。</p>
+  <form method="post" action="<?= e(url('admin/view-grants/all/create')) ?>" class="grid-form"><?= \App\Csrf::field() ?>
+    <label>付与する社員<select name="viewer_employee_id" required><option value="">社員を選択</option><?php foreach ($employees as $emp): ?><?php if ($emp['status'] === 'active' && $emp['role'] !== 'admin'): ?><option value="<?= (int)$emp['id'] ?>" <?= (int)($_GET['employee_id'] ?? 0) === (int)$emp['id'] ? 'selected' : '' ?>><?= e($emp['full_name']) ?><?= $emp['employee_code'] ? '（'.e($emp['employee_code']).'）' : '' ?></option><?php endif; ?><?php endforeach; ?></select></label>
+    <label>有効期限（任意）<input type="date" name="expires_on" min="<?= e(date('Y-m-d')) ?>"></label>
+    <button class="primary">全閲覧権限を付与</button>
+  </form>
+  <div class="table-wrap"><table><thead><tr><th>社員</th><th>有効期限</th><th>状態</th><th>操作</th></tr></thead><tbody>
+    <?php foreach ($allGrants as $g): $expired = $g['expires_on'] !== null && $g['expires_on'] < date('Y-m-d'); ?><tr>
+      <td><?= e($g['viewer_emp_name'] ?: '（不明）') ?></td>
+      <td><?= e($g['expires_on'] ?: '無期限') ?></td>
+      <td><span class="tag <?= $expired ? 'danger-tag' : 'success-tag' ?>"><?= $expired ? '期限切れ' : '有効' ?></span></td>
+      <td><form method="post" action="<?= e(url('admin/view-grants/delete')) ?>" class="inline-form" data-confirm="この社員の全閲覧権限を削除しますか？"><?= \App\Csrf::field() ?><input type="hidden" name="grant_id" value="<?= (int)$g['id'] ?>"><button class="danger small">削除</button></form></td>
+    </tr><?php endforeach; ?>
+    <?php if (!$allGrants): ?><tr><td colspan="4" class="empty">全閲覧権限が付与された社員はいません。</td></tr><?php endif; ?>
+  </tbody></table></div>
+</section>
+
+<h2 class="section-title">個別・グループ閲覧権限</h2>
 <section class="panel"><h2>閲覧権限を付与</h2><p class="muted">「閲覧する側」が「対象」のデータを読み取れるようにします。個人・グループのいずれも指定できます。</p>
   <form method="post" action="<?= e(url('admin/view-grants/create')) ?>" class="grid-form"><?= \App\Csrf::field() ?>
     <label>閲覧する側の種別<select name="viewer_type"><option value="employee">個人</option><option value="group">グループ</option></select></label>

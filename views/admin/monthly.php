@@ -13,7 +13,7 @@
       <td><?= e($row['employee_code'] ?: '—') ?></td>
       <td><?= (int)$row['worked_days'] ?>日</td>
       <td><strong><?= e(\App\AttendanceService::formatMinutes((int)$row['total_minutes'])) ?></strong></td>
-      <td><?= (int)$row['incomplete'] > 0 ? '<span class="tag" style="background:#feeaea;color:#8a2e2e">'.(int)$row['incomplete'].'件</span>' : '—' ?></td>
+      <td><?= (int)$row['incomplete'] > 0 ? '<span class="tag danger-tag">'.(int)$row['incomplete'].'件</span>' : '—' ?></td>
     </tr><?php endforeach; ?>
     <?php if (!$summary): ?><tr><td colspan="5" class="empty">この月の打刻はありません。</td></tr><?php endif; ?>
   </tbody></table></div>

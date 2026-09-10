@@ -4,7 +4,7 @@ use App\Csrf;
 $user = Auth::user();
 $flashes = $_SESSION['flash'] ?? [];
 unset($_SESSION['flash']);
-$assetVersion = '20260903-6';
+$assetVersion = '20260909-01';
 ?>
 <!doctype html>
 <html lang="ja">
@@ -16,8 +16,37 @@ $assetVersion = '20260903-6';
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <?php if ($user): ?><meta name="csrf-token" content="<?= e(Csrf::token()) ?>"><meta name="vapid-public-key" content="<?= e(\App\PushService::publicKey()) ?>"><?php endif; ?>
   <title><?= e($title ?? '勤怠管理') ?> | 社内勤怠管理</title>
-  <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+  <script>
+  (function () {
+    var key = 'attendance-theme';
+    var media = window.matchMedia('(prefers-color-scheme: dark)');
+    function preference() {
+      try { var saved = localStorage.getItem(key); return ['system','light','dark'].indexOf(saved) >= 0 ? saved : 'system'; }
+      catch (_) { return 'system'; }
+    }
+    function apply(value) {
+      var resolved = value === 'system' ? (media.matches ? 'dark' : 'light') : value;
+      document.documentElement.dataset.theme = value;
+      document.documentElement.dataset.resolvedTheme = resolved;
+      document.documentElement.style.colorScheme = resolved;
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.content = resolved === 'dark' ? '#10231f' : '#176b5b';
+      window.dispatchEvent(new CustomEvent('attendance-theme-change', {detail:{preference:value,resolved:resolved}}));
+    }
+    window.getAttendanceTheme = preference;
+    window.setAttendanceTheme = function (value) {
+      if (['system','light','dark'].indexOf(value) < 0) value = 'system';
+      try { localStorage.setItem(key, value); } catch (_) {}
+      apply(value);
+    };
+    apply(preference());
+    media.addEventListener ? media.addEventListener('change', function () { if (preference() === 'system') apply('system'); }) : media.addListener(function () { if (preference() === 'system') apply('system'); });
+  })();
+  </script>
+  <link rel="manifest" href="/manifest.webmanifest?v=2">
+  <link rel="icon" type="image/png" sizes="192x192" href="/assets/icons/icon-192.png?v=2">
+  <link rel="icon" type="image/png" sizes="512x512" href="/assets/icons/icon-512.png?v=2">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png?v=2">
   <link rel="stylesheet" href="/assets/app.css?v=<?= e($assetVersion) ?>">
   <script src="/assets/app.js?v=<?= e($assetVersion) ?>" defer></script>
 </head>
@@ -25,16 +54,31 @@ $assetVersion = '20260903-6';
 <?php if ($user): ?>
   <header class="topbar">
     <a class="brand" href="<?= e(url()) ?>"><span class="brand-mark">勤</span><span>社内勤怠管理</span></a>
-    <button class="nav-toggle" type="button" aria-label="メニュー" onclick="document.querySelector('.nav').classList.toggle('open')">☰</button>
-    <nav class="nav">
-      <a href="<?= e(url()) ?>">ホーム</a>
-      <a href="<?= e(url('leave')) ?>">有給</a>
-      <a href="<?= e(url('attendance')) ?>">出退勤</a>
-      <a href="<?= e(url('notice')) ?>">勤怠連絡</a>
-      <a href="<?= e(url('viewable')) ?>">閲覧</a>
-      <a href="<?= e(url('sharing')) ?>">公開設定</a>
-      <a href="<?= e(url('security')) ?>">セキュリティ</a>
-      <?php if ($user['role'] === 'admin'): ?><a href="<?= e(url('admin')) ?>">管理</a><?php endif; ?>
+    <button class="nav-toggle" type="button" aria-label="メニュー" aria-expanded="false" aria-controls="global-nav"><span class="nav-toggle-bars"></span></button>
+    <?php
+      $currentRoute = (string)($_GET['route'] ?? '');
+      // 有給・代休・勤怠連絡は「休暇・連絡」タブに集約している。
+      $navItems = [
+        ['', 'ホーム'],
+        ['leave', '休暇・勤怠連絡'],
+        ['attendance', '出退勤'],
+        ['viewable', '閲覧'],
+        ['sharing', '公開設定'],
+        ['security', '設定'],
+        ['contact', '問い合わせ'],
+      ];
+      if ($user['role'] === 'admin') $navItems[] = ['admin', '管理'];
+      // 旧「勤怠連絡」ページは休暇・連絡タブに統合。ブックマーク対策でルートは残す。
+      if ($currentRoute === 'notice') $currentRoute = 'leave';
+      $isActiveNav = static function (string $route) use ($currentRoute): bool {
+        if ($route === '') return $currentRoute === '';
+        return $currentRoute === $route || str_starts_with($currentRoute, $route . '/');
+      };
+    ?>
+    <nav class="nav" id="global-nav">
+      <?php foreach ($navItems as [$route, $label]): $active = $isActiveNav($route); ?>
+        <a href="<?= e(url($route)) ?>"<?= $active ? ' class="active" aria-current="page"' : '' ?>><?= e($label) ?></a>
+      <?php endforeach; ?>
       <form method="post" action="<?= e(url('logout')) ?>" class="nav-form"><?= Csrf::field() ?><button>ログアウト</button></form>
     </nav>
   </header>

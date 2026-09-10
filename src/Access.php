@@ -76,7 +76,8 @@ final class Access
                  OR (vg.viewer_type = 'group' AND EXISTS (SELECT 1 FROM group_memberships gmv WHERE gmv.group_id = vg.viewer_group_id AND gmv.employee_id = ?))
                )
                AND (
-                 (vg.target_type = 'employee' AND vg.target_employee_id = ?)
+                 vg.target_type = 'all'
+                 OR (vg.target_type = 'employee' AND vg.target_employee_id = ?)
                  OR (vg.target_type = 'group' AND EXISTS (SELECT 1 FROM group_memberships gmt WHERE gmt.group_id = vg.target_group_id AND gmt.employee_id = ?))
                )
              LIMIT 1"
@@ -103,11 +104,20 @@ final class Access
         $stmt->execute([$viewerEmployeeId, $viewerEmployeeId]);
         $ids = [];
         $groupIds = [];
+        $canViewAll = false;
         foreach ($stmt->fetchAll() as $row) {
-            if ($row['target_type'] === 'employee' && $row['target_employee_id'] !== null) {
+            if ($row['target_type'] === 'all') {
+                $canViewAll = true;
+            } elseif ($row['target_type'] === 'employee' && $row['target_employee_id'] !== null) {
                 $ids[(int)$row['target_employee_id']] = true;
             } elseif ($row['target_type'] === 'group' && $row['target_group_id'] !== null) {
                 $groupIds[(int)$row['target_group_id']] = true;
+            }
+        }
+        if ($canViewAll) {
+            $stmt = $pdo->query('SELECT e.id FROM employees e JOIN users u ON u.employee_id = e.id');
+            foreach ($stmt->fetchAll() as $row) {
+                $ids[(int)$row['id']] = true;
             }
         }
         if ($groupIds) {

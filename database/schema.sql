@@ -6,6 +6,7 @@ CREATE TABLE employees (
   employee_code VARCHAR(50) NULL UNIQUE,
   full_name VARCHAR(100) NOT NULL,
   hired_on DATE NULL,
+  leave_renewal_month TINYINT UNSIGNED NULL,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -36,9 +37,11 @@ CREATE TABLE leave_grants (
   days DECIMAL(5,1) NOT NULL,
   expires_on DATE NOT NULL,
   reason VARCHAR(255) NOT NULL,
-  created_by BIGINT UNSIGNED NOT NULL,
+  source VARCHAR(20) NOT NULL DEFAULT 'manual',
+  created_by BIGINT UNSIGNED NULL,
   created_at DATETIME NOT NULL,
   INDEX idx_grant_employee_expiry (employee_id, expires_on),
+  INDEX idx_grant_auto (employee_id, grant_year, source),
   CONSTRAINT fk_grant_employee FOREIGN KEY (employee_id) REFERENCES employees(id),
   CONSTRAINT fk_grant_creator FOREIGN KEY (created_by) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -81,6 +84,32 @@ CREATE TABLE leave_adjustments (
   CONSTRAINT fk_adjust_creator FOREIGN KEY (created_by) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE company_calendar_events (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  event_type VARCHAR(30) NOT NULL,
+  title VARCHAR(100) NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  start_time TIME NULL,
+  end_time TIME NULL,
+  notes TEXT NULL,
+  created_by BIGINT UNSIGNED NOT NULL,
+  updated_by BIGINT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  INDEX idx_company_calendar_dates (start_date, end_date),
+  CONSTRAINT fk_company_calendar_creator FOREIGN KEY (created_by) REFERENCES users(id),
+  CONSTRAINT fk_company_calendar_updater FOREIGN KEY (updated_by) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE japanese_holidays (
+  holiday_date DATE PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  source_url VARCHAR(255) NOT NULL,
+  synced_at DATETIME NOT NULL,
+  INDEX idx_japanese_holidays_synced (synced_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE attendance_events (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   employee_id BIGINT UNSIGNED NOT NULL,
@@ -91,6 +120,15 @@ CREATE TABLE attendance_events (
   INDEX idx_attendance_employee_time (employee_id, occurred_at),
   CONSTRAINT fk_attendance_employee FOREIGN KEY (employee_id) REFERENCES employees(id),
   CONSTRAINT fk_attendance_creator FOREIGN KEY (created_by) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Googleフォーム打刻連携の冪等キー（フォーム回答IDの重複記録防止）。
+CREATE TABLE form_webhook_events (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  response_id VARCHAR(64) NOT NULL UNIQUE,
+  attendance_event_id BIGINT UNSIGNED NULL,
+  received_at DATETIME NOT NULL,
+  CONSTRAINT fk_form_webhook_event FOREIGN KEY (attendance_event_id) REFERENCES attendance_events(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE attendance_notices (
@@ -175,7 +213,7 @@ CREATE TABLE view_grants (
   viewer_type ENUM('employee','group') NOT NULL,
   viewer_employee_id BIGINT UNSIGNED NULL,
   viewer_group_id BIGINT UNSIGNED NULL,
-  target_type ENUM('employee','group') NOT NULL,
+  target_type ENUM('employee','group','all') NOT NULL,
   target_employee_id BIGINT UNSIGNED NULL,
   target_group_id BIGINT UNSIGNED NULL,
   expires_on DATE NULL,
@@ -239,7 +277,6 @@ CREATE TABLE audit_logs (
   target_id BIGINT UNSIGNED NULL,
   before_json JSON NULL,
   after_json JSON NULL,
-  ip_address VARCHAR(45) NOT NULL,
   created_at DATETIME NOT NULL,
   INDEX idx_audit_created (created_at),
   CONSTRAINT fk_audit_actor FOREIGN KEY (actor_user_id) REFERENCES users(id)
