@@ -20,7 +20,7 @@
     <div class="calendar-form-section is-hidden" data-calendar-fields="notice">
       <label>勤怠種別<select name="notice_type"><option value="late">遅刻</option><option value="early">早退</option><option value="absence">欠勤</option><option value="holiday_work">休日出勤</option><option value="medical">健康診断</option><option value="other">その他</option></select></label>
       <div class="field-row"><label>出勤見込み<input type="time" name="expected_start"></label><label>退勤見込み<input type="time" name="expected_end"></label></div>
-      <label>連絡内容・理由<textarea name="details" rows="4" placeholder="例：電車遅延のため15分ほど遅刻します"></textarea></label>
+      <label>連絡内容・理由<textarea name="details" rows="4" placeholder="例：電車遅延のため15分ほど遅刻します" required></textarea></label>
     </div>
     <div class="modal-actions"><button type="button" data-calendar-dialog-close>キャンセル</button><button class="primary" type="submit">登録する</button></div>
   </form>

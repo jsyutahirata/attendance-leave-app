@@ -20,6 +20,7 @@
             <label>氏名<input name="full_name" maxlength="100" value="<?= e($editUser['full_name']) ?>" required></label>
             <label>社員番号<input name="employee_code" maxlength="50" value="<?= e($editUser['employee_code']) ?>"></label>
             <label>メールアドレス<input type="email" name="email" maxlength="255" value="<?= e($editUser['email']) ?>" required></label>
+            <label>サブメールアドレス<input type="email" name="secondary_email" maxlength="255" value="<?= e($editUser['secondary_email'] ?? '') ?>" placeholder="任意。これでもログイン可"></label>
             <label>入社日<input type="date" name="hired_on" value="<?= e($editUser['hired_on']) ?>"></label>
             <label>有給更新月<input type="number" name="leave_renewal_month" min="1" max="12" value="<?= e($editUser['leave_renewal_month']) ?>" placeholder="例：10"></label>
             <label>権限
@@ -37,12 +38,17 @@
                 </select>
                 <?php if ((int)$editUser['id'] === \App\Auth::id()): ?><input type="hidden" name="status" value="active"><?php endif; ?>
             </label>
-            <label class="form-sync-field"><span>フォーム同期（部分移行）</span>
-                <span class="checkbox-inline"><input type="checkbox" name="form_sync_enabled" value="1" <?= (int)($editUser['form_sync_enabled'] ?? 0) === 1 ? 'checked' : '' ?>> アプリ打刻を元フォームへ転送する</span>
-            </label>
-            <label>フォーム送信氏名<input name="form_sync_name" maxlength="100" value="<?= e($editUser['form_sync_name'] ?? '') ?>" placeholder="送信先フォームの氏名と完全一致（例：平田雄大）"></label>
         </div>
-        <p class="modal-note">休職中は所属・閲覧権限を保持します。無効にすると関連設定も削除します。<br>フォーム同期をONにすると、この社員がアプリで打刻するたびに、元Googleフォームへ同じ内容が自動送信されます（部分移行の対象者のみ）。氏名は送信先フォームの選択肢と完全一致させてください。</p>
+        <?php $migOpen = ((int)($editUser['form_sync_enabled'] ?? 0) === 1) || ((int)($editUser['notice_sync_enabled'] ?? 0) === 1) || !empty($editUser['form_sync_name']); ?>
+        <details class="migration-settings"<?= $migOpen ? ' open' : '' ?>>
+            <summary>フォーム連携（部分移行の対象者のみ）</summary>
+            <div class="grid-form">
+                <label class="checkbox-label"><input type="checkbox" name="form_sync_enabled" value="1" <?= (int)($editUser['form_sync_enabled'] ?? 0) === 1 ? 'checked' : '' ?>> 出退勤フォーム連携（アプリ打刻を元フォームへ送信）</label>
+                <label class="checkbox-label"><input type="checkbox" name="notice_sync_enabled" value="1" <?= (int)($editUser['notice_sync_enabled'] ?? 0) === 1 ? 'checked' : '' ?>> 勤怠連絡フォーム連携（アプリの勤怠連絡を元フォームへ送信）</label>
+                <label>フォーム送信氏名<input name="form_sync_name" maxlength="100" value="<?= e($editUser['form_sync_name'] ?? '') ?>" placeholder="送信先フォームの氏名と完全一致（例：平田雄大）"></label>
+            </div>
+        </details>
+        <p class="modal-note">休職中は所属・閲覧権限を保持します。無効にすると関連設定も削除します。<br>フォーム連携をONにすると、この社員がアプリで打刻・勤怠連絡するたびに、対応する元Googleフォームへ自動送信されます（部分移行の対象者のみ）。氏名は送信先フォームの選択肢と完全一致させてください（出退勤・勤怠連絡で共用）。</p>
         <div class="modal-actions">
             <button type="button" data-modal-close>キャンセル</button>
             <button class="primary">変更を保存</button>
@@ -53,7 +59,7 @@
 
 <section class="panel">
     <h2>社員を追加</h2>
-    <p class="muted">作成後、本人へ24時間有効のパスワード設定メールを送ります。</p>
+    <p class="muted">作成後、本人へ24時間有効のパスワード設定メールを送ります（「初期設定メールを送らない」を選ぶと送信しません）。</p>
     <form method="post" action="<?= e(url('admin/users/create')) ?>" class="grid-form">
         <?= \App\Csrf::field() ?>
         <label>氏名<input name="full_name" maxlength="100" required></label>
@@ -62,7 +68,8 @@
         <label>入社日<input type="date" name="hired_on"></label>
         <label>有給更新月<input type="number" name="leave_renewal_month" min="1" max="12" placeholder="例：10"></label>
         <label>権限<select name="role"><option value="employee">社員</option><option value="admin">管理者</option></select></label>
-        <button class="primary">作成して招待する</button>
+        <label class="checkbox-label"><input type="checkbox" name="skip_invite" value="1"> 初期設定メールを送らない（事前登録用・移行時に「パスワード再設定」から送る）</label>
+        <button class="primary">作成する</button>
     </form>
 </section>
 

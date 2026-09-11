@@ -4,7 +4,7 @@ use App\Csrf;
 $user = Auth::user();
 $flashes = $_SESSION['flash'] ?? [];
 unset($_SESSION['flash']);
-$assetVersion = '20260909-01';
+$assetVersion = '20260911-03';
 ?>
 <!doctype html>
 <html lang="ja">

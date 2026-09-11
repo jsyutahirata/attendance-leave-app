@@ -289,7 +289,11 @@ final class LeaveImportService
         return $rows;
     }
 
-    public static function import(array $preview, int $actorId): array
+    /**
+     * @param bool $replace 全社の正として反映（置換）モード。対象社員の既存の付与・調整を削除してから取り込む。
+     *                      重複判定は無視する（削除済みのため）。移行の一括反映に使う。
+     */
+    public static function import(array $preview, int $actorId, bool $replace = false): array
     {
         if ((int)($preview['created_at'] ?? 0) < time() - 1800 || !isset($preview['rows']) || !is_array($preview['rows'])) {
             throw new DomainException('確認データの有効期限が切れました。CSVをもう一度選択してください。');
@@ -301,16 +305,33 @@ final class LeaveImportService
         $updateRenewalMonth = $pdo->prepare('UPDATE employees SET leave_renewal_month=?, updated_at=NOW() WHERE id=?');
         $findDuplicate = $pdo->prepare('SELECT id FROM leave_grants WHERE employee_id=? AND grant_year=? AND granted_on=? AND days=? AND expires_on=? LIMIT 1');
         $insertAdvance = $pdo->prepare('INSERT INTO leave_adjustments (employee_id, grant_year, days_delta, reason, created_by, created_at) VALUES (?, ?, ?, ?, ?, NOW())');
-        $imported = 0; $skipped = 0;
+        $imported = 0; $skipped = 0; $replacedEmployees = 0;
         $pdo->beginTransaction();
         try {
+            // 置換モード: 取込対象の社員の既存付与・調整を先に削除し、CSVを唯一の正にする。
+            if ($replace) {
+                $ids = [];
+                foreach ($preview['rows'] as $row) {
+                    if (!empty($row['employee_id']) && empty($row['errors'])) $ids[(int)$row['employee_id']] = true;
+                }
+                $ids = array_keys($ids);
+                if ($ids) {
+                    $ph = implode(',', array_fill(0, count($ids), '?'));
+                    $pdo->prepare("DELETE FROM leave_adjustments WHERE employee_id IN ($ph)")->execute($ids);
+                    $pdo->prepare("DELETE FROM leave_grants WHERE employee_id IN ($ph)")->execute($ids);
+                }
+                $replacedEmployees = count($ids);
+            }
             foreach ($preview['rows'] as $row) {
                 $employeeId = (int)($row['employee_id'] ?? 0); $findEmployee->execute([$employeeId]);
                 if (!$findEmployee->fetch()) throw new DomainException('取り込み中に対象社員が見つからなくなりました。');
                 if (!empty($row['renewal_month'])) $updateRenewalMonth->execute([(int)$row['renewal_month'], $employeeId]);
-                if (!empty($row['duplicate']) || (string)($row['skip_reason'] ?? '') !== '') { $skipped++; continue; }
-                $findDuplicate->execute([$employeeId, (int)$row['grant_year'], $row['granted_on'], (float)$row['days'], $row['expires_on']]);
-                if ($findDuplicate->fetch()) { $skipped++; continue; }
+                if ((string)($row['skip_reason'] ?? '') !== '') { $skipped++; continue; }
+                if (!$replace) {
+                    if (!empty($row['duplicate'])) { $skipped++; continue; }
+                    $findDuplicate->execute([$employeeId, (int)$row['grant_year'], $row['granted_on'], (float)$row['days'], $row['expires_on']]);
+                    if ($findDuplicate->fetch()) { $skipped++; continue; }
+                }
                 $reason = 'CSV初期移行' . ($row['note'] !== '' ? '：' . $row['note'] : '');
                 $insert->execute([$employeeId, $row['granted_on'], (int)$row['grant_year'], (float)$row['days'], $row['expires_on'], $reason, $actorId]);
                 $advanceDays = (float)($row['advance_days'] ?? 0);
@@ -319,12 +340,12 @@ final class LeaveImportService
                 }
                 $imported++;
             }
-            Audit::log('leave_import_completed', 'leave_grant_import', null, null, ['file_name' => $preview['source_name'] ?? '', 'file_sha256' => $preview['source_hash'] ?? '', 'source_format' => $preview['source_format'] ?? '', 'as_of' => $preview['as_of'] ?? null, 'imported' => $imported, 'skipped' => $skipped], $actorId);
+            Audit::log('leave_import_completed', 'leave_grant_import', null, null, ['file_name' => $preview['source_name'] ?? '', 'file_sha256' => $preview['source_hash'] ?? '', 'source_format' => $preview['source_format'] ?? '', 'as_of' => $preview['as_of'] ?? null, 'imported' => $imported, 'skipped' => $skipped, 'replace' => $replace, 'replaced_employees' => $replacedEmployees], $actorId);
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
-        return ['imported' => $imported, 'skipped' => $skipped];
+        return ['imported' => $imported, 'skipped' => $skipped, 'replaced_employees' => $replacedEmployees];
     }
 }

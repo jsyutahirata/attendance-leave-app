@@ -20,7 +20,7 @@
       </tbody></table></div>
       <?php if (count($importPreview['rows']) > 200): ?><p class="muted">画面には先頭200行まで表示しています。</p><?php endif; ?>
       <div class="row-actions">
-        <?php if ((int)$importPreview['error_count'] === 0 && (int)$importPreview['valid_count'] > 0): ?><form method="post" action="<?= e(url('admin/leave/import/confirm')) ?>" data-confirm="表示されている有給残数を取り込みますか？"><?= \App\Csrf::field() ?><button class="primary">この内容で取り込む</button></form><?php endif; ?>
+        <?php if ((int)$importPreview['error_count'] === 0 && (int)$importPreview['valid_count'] > 0): ?><form method="post" action="<?= e(url('admin/leave/import/confirm')) ?>" data-confirm="表示されている有給残数を取り込みますか？（全社反映にチェックした場合、対象社員の既存の付与は置き換えられます）"><?= \App\Csrf::field() ?><label class="checkbox-label" style="margin-bottom:10px"><input type="checkbox" name="migration_mode" value="1"> 全社の正として反映する（対象社員の既存の付与を置き換え、取り込んだ日を有給移行の基準日として記録）</label><button class="primary">この内容で取り込む</button></form><?php endif; ?>
         <form method="post" action="<?= e(url('admin/leave/import/cancel')) ?>"><?= \App\Csrf::field() ?><button>確認を取り消す</button></form>
       </div>
       <?php if ((int)$importPreview['error_count'] > 0): ?><p class="flash error">エラー行があります。CSVを修正して、もう一度読み込んでください。</p><?php endif; ?>

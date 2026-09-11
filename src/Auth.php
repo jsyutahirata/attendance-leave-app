@@ -16,8 +16,10 @@ final class Auth
     public static function attempt(string $email, string $password, bool $remember = false): string
     {
         $pdo = Database::connection();
-        $stmt = $pdo->prepare('SELECT u.*, e.full_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.email = ? LIMIT 1');
-        $stmt->execute([mb_strtolower(trim($email))]);
+        // 主メール・サブメールのどちらでもログインできる。
+        $normalizedEmail = mb_strtolower(trim($email));
+        $stmt = $pdo->prepare('SELECT u.*, e.full_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.email = ? OR u.secondary_email = ? LIMIT 1');
+        $stmt->execute([$normalizedEmail, $normalizedEmail]);
         $user = $stmt->fetch();
         $now = new \DateTimeImmutable();
 

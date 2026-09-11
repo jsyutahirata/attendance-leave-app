@@ -23,6 +23,7 @@ final class Controller
             'POST' => [
                 'login' => 'login', 'login/totp' => 'totpVerify', 'logout' => 'logout', 'forgot-password' => 'forgot', 'reset-password' => 'reset',
                 'security/totp/init' => 'securityTotpInit', 'security/totp/confirm' => 'securityTotpConfirm', 'security/totp/disable' => 'securityTotpDisable',
+                'security/secondary-email' => 'securitySecondaryEmail',
                 'push/subscribe' => 'pushSubscribe', 'push/unsubscribe' => 'pushUnsubscribe', 'push/preferences' => 'pushPreferences',
                 'admin/users/totp-disable' => 'adminUserTotpDisable',
                 'leave/create' => 'leaveCreate', 'leave/cancel' => 'leaveCancel',
@@ -115,6 +116,32 @@ final class Controller
             'pushSubscriptionCount' => PushService::subscriptionCount((int)Auth::id()),
             'pushPreference' => PushService::preference((int)Auth::id()),
         ]);
+    }
+
+    /** 本人がサブ（副）メールアドレスを設定・削除する（設定画面）。空で削除。 */
+    private function securitySecondaryEmail(): void
+    {
+        $userId = (int)Auth::id();
+        $secondaryEmail = mb_strtolower(trim((string)($_POST['secondary_email'] ?? '')));
+        $current = (string)(Auth::user()['email'] ?? '');
+        if ($secondaryEmail !== '' && (mb_strlen($secondaryEmail) > 255 || !filter_var($secondaryEmail, FILTER_VALIDATE_EMAIL))) {
+            flash('error', 'サブメールアドレスの形式が正しくありません。'); redirect('security');
+        }
+        if ($secondaryEmail !== '' && $secondaryEmail === $current) {
+            flash('error', 'サブメールアドレスは主メールと別のアドレスにしてください。'); redirect('security');
+        }
+        $value = $secondaryEmail === '' ? null : $secondaryEmail;
+        $pdo = Database::connection();
+        if ($value !== null) {
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM users WHERE (email = ? OR secondary_email = ?) AND id <> ?');
+            $stmt->execute([$value, $value, $userId]);
+            if ((int)$stmt->fetchColumn() > 0) { flash('error', 'そのサブメールアドレスは既に使われています。'); redirect('security'); }
+        }
+        $before = Auth::user()['secondary_email'] ?? null;
+        $pdo->prepare('UPDATE users SET secondary_email = ?, updated_at = NOW() WHERE id = ?')->execute([$value, $userId]);
+        Audit::log('secondary_email_changed', 'user', $userId, ['secondary_email' => $before], ['secondary_email' => $value], $userId);
+        flash('success', $value === null ? 'サブメールアドレスを削除しました。' : 'サブメールアドレスを設定しました。');
+        redirect('security');
     }
 
     private function pushPreferences(): void
@@ -251,8 +278,9 @@ final class Controller
     {
         $email = mb_strtolower(trim((string)($_POST['email'] ?? '')));
         $pdo = Database::connection();
-        $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ? AND status = 'active'");
-        $stmt->execute([$email]);
+        // 主メール・サブメールのどちらでも再設定を受け付ける。
+        $stmt = $pdo->prepare("SELECT id FROM users WHERE (email = ? OR secondary_email = ?) AND status = 'active'");
+        $stmt->execute([$email, $email]);
         $userId = $stmt->fetchColumn();
         if ($userId) {
             $token = bin2hex(random_bytes(32));
@@ -479,6 +507,10 @@ final class Controller
         if (!in_array($type, $types, true) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
             throw new DomainException('対象日と勤怠種別を正しく入力してください。');
         }
+        $details = trim((string)($input['details'] ?? ''));
+        if ($details === '') {
+            throw new DomainException('連絡内容・理由を入力してください。');
+        }
         $pdo = Database::connection();
         $pdo->beginTransaction();
         try {
@@ -489,19 +521,35 @@ final class Controller
             }
             $leaveMap = ['leave_full' => 'full', 'leave_am' => 'am', 'leave_pm' => 'pm'];
             if (isset($leaveMap[$type])) {
-                $leaveEntryId = LeaveService::create((int)Auth::employeeId(), ['leave_date' => $date, 'leave_type' => $leaveMap[$type], 'note' => $input['details'] ?? '', 'confirmed_with' => $input['confirmed_with'] ?? '']);
+                $leaveEntryId = LeaveService::create((int)Auth::employeeId(), ['leave_date' => $date, 'leave_type' => $leaveMap[$type], 'note' => $details, 'confirmed_with' => $input['confirmed_with'] ?? '']);
             }
             $stmt = $pdo->prepare('INSERT INTO attendance_notices (employee_id, target_date, notice_type, expected_start, expected_end, details, leave_entry_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())');
             $expectedStart = trim((string)($input['expected_start'] ?? '')) ?: null;
             $expectedEnd = trim((string)($input['expected_end'] ?? '')) ?: null;
-            $stmt->execute([Auth::employeeId(), $date, $type, $expectedStart, $expectedEnd, trim((string)($input['details'] ?? '')), $leaveEntryId, Auth::id()]);
+            $stmt->execute([Auth::employeeId(), $date, $type, $expectedStart, $expectedEnd, $details, $leaveEntryId, Auth::id()]);
             $noticeId = (int)$pdo->lastInsertId();
             Audit::log('attendance_notice_created', 'attendance_notice', $noticeId, null, ['type' => $type, 'date' => $date]);
             // 休日出勤は代休1日分を同一トランザクション内で自動発生させる（§7.8）。
             $grantId = $type === 'holiday_work'
                 ? CompLeaveService::generateForHolidayWork((int)Auth::employeeId(), $date, $noticeId) : 0;
             $pdo->commit();
-            return $grantId > 0 ? '勤怠連絡を登録し、代休1日を付与しました。' : '勤怠連絡を登録しました。';
+            $message = $grantId > 0 ? '勤怠連絡を登録し、代休1日を付与しました。' : '勤怠連絡を登録しました。';
+            // 部分移行: 勤怠連絡フォーム連携ONの社員は、元「勤怠連絡フォーム」へも転送（ベストエフォート）。
+            try {
+                $emp = $pdo->prepare('SELECT id, notice_sync_enabled, form_sync_name FROM employees WHERE id = ?');
+                $emp->execute([Auth::employeeId()]);
+                if ($row = $emp->fetch()) {
+                    $syncStatus = NoticeFormSyncService::submitForEmployee($row, ['notice_type' => $type, 'target_date' => $date, 'expected_start' => $expectedStart, 'expected_end' => $expectedEnd, 'details' => $details]);
+                    if ($syncStatus === 'failed') {
+                        flash('sync-warn', '勤怠連絡フォームへの送信に失敗しました（連絡は保存済み）');
+                    } elseif ($syncStatus === 'ok') {
+                        flash('sync-ok', '勤怠連絡フォームへ送信しました');
+                    }
+                }
+            } catch (\Throwable $e) {
+                error_log('[notice-sync] hook failed: ' . $e->getMessage());
+            }
+            return $message;
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $e;
@@ -554,16 +602,24 @@ final class Controller
         }
         $pdo->commit();
         // 部分移行: フォーム同期対象の社員は、アプリ打刻を元Googleフォームへも転送する（ベストエフォート）。
+        $syncStatus = 'skipped';
         try {
             $emp = $pdo->prepare('SELECT id, full_name, form_sync_enabled, form_sync_name FROM employees WHERE id = ?');
             $emp->execute([Auth::employeeId()]);
             if ($row = $emp->fetch()) {
-                FormSyncService::submitForEmployee($row, $eventType);
+                $syncStatus = FormSyncService::submitForEmployee($row, $eventType);
             }
         } catch (\Throwable $e) {
+            $syncStatus = 'failed';
             error_log('[form-sync] clock hook failed: ' . $e->getMessage());
         }
         flash('success', ($eventType === 'clock_in' ? '出勤を記録しました。' : '退勤を記録しました。') . ($grantId > 0 ? '土日の出勤につき代休1日を付与しました。' : ''));
+        // 打刻成功メッセージの下に、フォーム転送の結果を控えめな1行で出す（打刻自体は常に保存済み）。
+        if ($syncStatus === 'failed') {
+            flash('sync-warn', '出退勤Googleフォームへの送信に失敗しました（打刻は保存済み）');
+        } elseif ($syncStatus === 'ok') {
+            flash('sync-ok', '出退勤Googleフォームへ送信しました');
+        }
         redirect('attendance');
     }
 
@@ -584,11 +640,11 @@ final class Controller
     {
         Auth::requireAdmin();
         $pdo = Database::connection();
-        $users = $pdo->query('SELECT u.*, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month , e.form_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id ORDER BY e.full_name')->fetchAll();
+        $users = $pdo->query('SELECT u.*, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month, e.leave_migration_date , e.form_sync_enabled, e.notice_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id ORDER BY e.full_name')->fetchAll();
         $editUser = null;
         $editId = (int)($_GET['edit'] ?? 0);
         if ($editId > 0) {
-            $stmt = $pdo->prepare('SELECT u.*, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month , e.form_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?');
+            $stmt = $pdo->prepare('SELECT u.*, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month, e.leave_migration_date , e.form_sync_enabled, e.notice_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?');
             $stmt->execute([$editId]);
             $editUser = $stmt->fetch() ?: null;
             if ($editUser === null) flash('error', '編集対象の社員が見つかりません。');
@@ -607,6 +663,8 @@ final class Controller
             flash('error', '氏名と正しいメールアドレスを入力してください。'); redirect('admin/users');
         }
         if ($renewalMonth < 0 || $renewalMonth > 12) { flash('error', '有給更新月は1〜12で入力してください。'); redirect('admin/users'); }
+        // 事前登録用: 初期設定（招待）メールを送らずにアカウントだけ作る。移行時に「パスワード再設定」で送る。
+        $skipInvite = ($_POST['skip_invite'] ?? '') === '1';
         $temporaryPassword = bin2hex(random_bytes(32));
         $pdo = Database::connection(); $pdo->beginTransaction();
         try {
@@ -616,13 +674,20 @@ final class Controller
             $stmt = $pdo->prepare("INSERT INTO users (employee_id, email, password_hash, role, status, session_token, failed_login_attempts, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, 0, NOW(), NOW())");
             $stmt->execute([$employeeId, $email, password_hash($temporaryPassword, PASSWORD_DEFAULT), ($_POST['role'] ?? '') === 'admin' ? 'admin' : 'employee', bin2hex(random_bytes(16))]);
             $userId = (int)$pdo->lastInsertId();
-            $token = bin2hex(random_bytes(32));
-            $pdo->prepare('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR), NOW())')->execute([$userId, hash('sha256', $token)]);
-            Audit::log('account_created', 'user', $userId, null, ['email' => $email, 'employee_id' => $employeeId]);
+            $token = null;
+            if (!$skipInvite) {
+                $token = bin2hex(random_bytes(32));
+                $pdo->prepare('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 24 HOUR), NOW())')->execute([$userId, hash('sha256', $token)]);
+            }
+            Audit::log('account_created', 'user', $userId, null, ['email' => $email, 'employee_id' => $employeeId, 'invite_sent' => !$skipInvite]);
             $pdo->commit();
-            $link = rtrim((string)config('APP_URL'), '/') . url('reset-password') . '&token=' . urlencode($token);
-            $sent = PasswordMail::sendInvite($email, $link);
-            flash($sent ? 'success' : 'error', $sent ? '社員アカウントを作成し、招待メールを送信しました。' : 'アカウントは作成しましたが、招待メールを送信できませんでした。本人にパスワード再設定を試してもらってください。');
+            if ($skipInvite) {
+                flash('success', '社員アカウントを作成しました（初期設定メールは送信していません。移行時に「パスワード再設定」から送信してください）。');
+            } else {
+                $link = rtrim((string)config('APP_URL'), '/') . url('reset-password') . '&token=' . urlencode($token);
+                $sent = PasswordMail::sendInvite($email, $link);
+                flash($sent ? 'success' : 'error', $sent ? '社員アカウントを作成し、招待メールを送信しました。' : 'アカウントは作成しましたが、招待メールを送信できませんでした。本人にパスワード再設定を試してもらってください。');
+            }
         } catch (\Throwable $e) {
             $pdo->rollBack(); flash('error', 'アカウントを作成できませんでした。メールアドレスや社員番号の重複を確認してください。');
         }
@@ -636,28 +701,41 @@ final class Controller
         $name = trim((string)($_POST['full_name'] ?? ''));
         $employeeCode = trim((string)($_POST['employee_code'] ?? ''));
         $email = mb_strtolower(trim((string)($_POST['email'] ?? '')));
+        $secondaryEmail = mb_strtolower(trim((string)($_POST['secondary_email'] ?? '')));
         $hiredOn = trim((string)($_POST['hired_on'] ?? ''));
         $renewalMonthInput = trim((string)($_POST['leave_renewal_month'] ?? ''));
         $renewalMonth = $renewalMonthInput === '' ? 0 : (ctype_digit($renewalMonthInput) ? (int)$renewalMonthInput : -1);
         $role = (string)($_POST['role'] ?? '');
         $status = (string)($_POST['status'] ?? '');
         $formSyncEnabled = ($_POST['form_sync_enabled'] ?? '') === '1' ? 1 : 0;
+        $noticeSyncEnabled = ($_POST['notice_sync_enabled'] ?? '') === '1' ? 1 : 0;
         $formSyncName = trim((string)($_POST['form_sync_name'] ?? ''));
+        $migrationDate = trim((string)($_POST['leave_migration_date'] ?? ''));
         if ($id < 1 || $name === '' || mb_strlen($name) > 100 || mb_strlen($employeeCode) > 50 || mb_strlen($email) > 255 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             flash('error', '氏名・社員番号・メールアドレスを確認してください。'); redirect('admin/users');
+        }
+        if ($secondaryEmail !== '' && (mb_strlen($secondaryEmail) > 255 || !filter_var($secondaryEmail, FILTER_VALIDATE_EMAIL))) {
+            flash('error', 'サブメールアドレスの形式が正しくありません。'); redirect('admin/users');
+        }
+        if ($secondaryEmail !== '' && $secondaryEmail === $email) {
+            flash('error', 'サブメールアドレスは主メールと別のアドレスにしてください。'); redirect('admin/users');
         }
         if (!in_array($role, ['employee', 'admin'], true) || !in_array($status, ['active', 'disabled', 'suspended'], true)) {
             flash('error', '権限または在籍状態が正しくありません。'); redirect('admin/users');
         }
         if ($renewalMonth < 0 || $renewalMonth > 12) { flash('error', '有給更新月は1〜12で入力してください。'); redirect('admin/users'); }
         if (mb_strlen($formSyncName) > 100) { flash('error', 'フォーム同期の氏名は100文字以内で入力してください。'); redirect('admin/users'); }
-        if ($formSyncEnabled === 1 && $formSyncName === '') { flash('error', 'フォーム同期をONにする場合は、フォームに送信する氏名を入力してください。'); redirect('admin/users'); }
+        if (($formSyncEnabled === 1 || $noticeSyncEnabled === 1) && $formSyncName === '') { flash('error', 'フォーム連携をONにする場合は、フォームに送信する氏名を入力してください。'); redirect('admin/users'); }
         if ($hiredOn !== '') {
             $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $hiredOn);
             if (!$date || $date->format('Y-m-d') !== $hiredOn) { flash('error', '入社日を正しく入力してください。'); redirect('admin/users'); }
         }
+        if ($migrationDate !== '') {
+            $md = \DateTimeImmutable::createFromFormat('!Y-m-d', $migrationDate);
+            if (!$md || $md->format('Y-m-d') !== $migrationDate) { flash('error', '有給の移行基準日を正しく入力してください。'); redirect('admin/users'); }
+        }
         $pdo = Database::connection();
-        $stmt = $pdo->prepare('SELECT u.id, u.employee_id, u.email, u.role, u.status, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month , e.form_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?');
+        $stmt = $pdo->prepare('SELECT u.id, u.employee_id, u.email, u.secondary_email, u.role, u.status, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month, e.leave_migration_date , e.form_sync_enabled, e.notice_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?');
         $stmt->execute([$id]); $before = $stmt->fetch();
         if (!$before) { flash('error', '対象の社員が見つかりません。'); redirect('admin/users'); }
         if ($id === Auth::id() && ($role !== 'admin' || $status !== 'active')) {
@@ -666,8 +744,15 @@ final class Controller
         $employeeCode = $employeeCode === '' ? null : $employeeCode;
         $hiredOn = $hiredOn === '' ? null : $hiredOn;
         $formSyncName = $formSyncName === '' ? null : $formSyncName;
-        $stmt = $pdo->prepare('SELECT COUNT(*) FROM users WHERE email = ? AND id <> ?'); $stmt->execute([$email, $id]);
+        $migrationDate = $migrationDate === '' ? null : $migrationDate;
+        $secondaryEmail = $secondaryEmail === '' ? null : $secondaryEmail;
+        // メールの一意性は主・サブ両列をまたいで確認する（ログインの曖昧さを防ぐ）。
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM users WHERE (email = ? OR secondary_email = ?) AND id <> ?'); $stmt->execute([$email, $email, $id]);
         if ((int)$stmt->fetchColumn() > 0) { flash('error', 'そのメールアドレスは別の社員が使用しています。'); redirect('admin/users'); }
+        if ($secondaryEmail !== null) {
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM users WHERE (email = ? OR secondary_email = ?) AND id <> ?'); $stmt->execute([$secondaryEmail, $secondaryEmail, $id]);
+            if ((int)$stmt->fetchColumn() > 0) { flash('error', 'そのサブメールアドレスは別の社員が使用しています。'); redirect('admin/users'); }
+        }
         if ($employeeCode !== null) {
             $stmt = $pdo->prepare('SELECT COUNT(*) FROM employees WHERE employee_code = ? AND id <> ?'); $stmt->execute([$employeeCode, (int)$before['employee_id']]);
             if ((int)$stmt->fetchColumn() > 0) { flash('error', 'その社員番号は別の社員が使用しています。'); redirect('admin/users'); }
@@ -676,12 +761,12 @@ final class Controller
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active' AND id <> ?"); $stmt->execute([$id]);
             if ((int)$stmt->fetchColumn() < 1) { flash('error', '有効な管理者が0人になるため、この変更はできません。'); redirect('admin/users'); }
         }
-        $after = ['full_name' => $name, 'employee_code' => $employeeCode, 'hired_on' => $hiredOn, 'leave_renewal_month' => $renewalMonth ?: null, 'form_sync_enabled' => $formSyncEnabled, 'form_sync_name' => $formSyncName, 'email' => $email, 'role' => $role, 'status' => $status];
+        $after = ['full_name' => $name, 'employee_code' => $employeeCode, 'hired_on' => $hiredOn, 'leave_renewal_month' => $renewalMonth ?: null, 'leave_migration_date' => $migrationDate, 'form_sync_enabled' => $formSyncEnabled, 'notice_sync_enabled' => $noticeSyncEnabled, 'form_sync_name' => $formSyncName, 'email' => $email, 'secondary_email' => $secondaryEmail, 'role' => $role, 'status' => $status];
         $beforeAudit = array_intersect_key($before, $after);
         $pdo->beginTransaction();
         try {
-            $pdo->prepare('UPDATE employees SET full_name = ?, employee_code = ?, hired_on = ?, leave_renewal_month = ?, form_sync_enabled = ?, form_sync_name = ?, updated_at = NOW() WHERE id = ?')->execute([$name, $employeeCode, $hiredOn, $renewalMonth ?: null, $formSyncEnabled, $formSyncName, (int)$before['employee_id']]);
-            $pdo->prepare('UPDATE users SET email = ?, role = ?, status = ?, updated_at = NOW() WHERE id = ?')->execute([$email, $role, $status, $id]);
+            $pdo->prepare('UPDATE employees SET full_name = ?, employee_code = ?, hired_on = ?, leave_renewal_month = ?, leave_migration_date = ?, form_sync_enabled = ?, notice_sync_enabled = ?, form_sync_name = ?, updated_at = NOW() WHERE id = ?')->execute([$name, $employeeCode, $hiredOn, $renewalMonth ?: null, $migrationDate, $formSyncEnabled, $noticeSyncEnabled, $formSyncName, (int)$before['employee_id']]);
+            $pdo->prepare('UPDATE users SET email = ?, secondary_email = ?, role = ?, status = ?, updated_at = NOW() WHERE id = ?')->execute([$email, $secondaryEmail, $role, $status, $id]);
             $emailOrRoleChanged = $email !== $before['email'] || $role !== $before['role'];
             $becameInactive = $status !== 'active' && $before['status'] === 'active';
             if (($emailOrRoleChanged && $id !== Auth::id()) || $becameInactive) Auth::revokeAllSessions($id);
@@ -764,7 +849,7 @@ final class Controller
         Auth::requireAdmin();
         $id = (int)($_POST['user_id'] ?? 0);
         $pdo = Database::connection();
-        $stmt = $pdo->prepare("SELECT u.id, u.email, u.status, e.full_name , e.form_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?");
+        $stmt = $pdo->prepare("SELECT u.id, u.email, u.status, e.full_name , e.form_sync_enabled, e.notice_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.id = ?");
         $stmt->execute([$id]);
         $user = $stmt->fetch();
         if (!$user) { flash('error', '対象の社員が見つかりません。'); redirect('admin/users'); }
@@ -866,9 +951,18 @@ final class Controller
     {
         Auth::requireAdmin();
         try {
-            $result = LeaveImportService::import((array)($_SESSION['leave_import_preview'] ?? []), (int)Auth::id());
+            $replace = ($_POST['migration_mode'] ?? '') === '1';
+            $result = LeaveImportService::import((array)($_SESSION['leave_import_preview'] ?? []), (int)Auth::id(), $replace);
             unset($_SESSION['leave_import_preview']);
-            flash('success', "有給残数を{$result['imported']}件取り込みました。重複{$result['skipped']}件はスキップしました。");
+            if ($replace) {
+                // 取り込んだ日を全社共通の有給移行基準日として記録。以降の自動付与はこの日以降だけになる。
+                $today = date('Y-m-d');
+                Settings::set('leave_migration_date', $today, (int)Auth::id());
+                Audit::log('leave_migration_completed', 'app_setting', null, null, ['leave_migration_date' => $today, 'replaced_employees' => $result['replaced_employees'] ?? 0, 'imported' => $result['imported']], (int)Auth::id());
+                flash('success', "全社の正として有給残数を反映しました（対象{$result['replaced_employees']}名・{$result['imported']}件）。移行基準日を{$today}に設定し、以降は基準日より後の分だけ自動付与します。");
+            } else {
+                flash('success', "有給残数を{$result['imported']}件取り込みました。重複{$result['skipped']}件はスキップしました。");
+            }
         } catch (DomainException $e) {
             flash('error', $e->getMessage());
         } catch (\Throwable $e) {
@@ -1074,7 +1168,8 @@ final class Controller
     private function adminAudit(): void
     {
         Auth::requireAdmin();
-        $logs = Database::connection()->query('SELECT a.*, u.email AS actor_email FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_user_id ORDER BY a.id DESC LIMIT 500')->fetchAll();
+        // 実行者は個人情報のメールではなく、氏名（アカウント名）で表示する。
+        $logs = Database::connection()->query('SELECT a.*, e.full_name AS actor_name FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_user_id LEFT JOIN employees e ON e.id=u.employee_id ORDER BY a.id DESC LIMIT 500')->fetchAll();
         render('admin/audit', ['title' => '操作履歴', 'logs' => $logs]);
     }
 

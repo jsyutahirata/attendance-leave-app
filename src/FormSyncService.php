@@ -24,20 +24,21 @@ final class FormSyncService
     /**
      * 対象社員の打刻をフォームへ転送する。対象外・未設定・未構成なら何もしない。
      * @param array<string,mixed> $employee form_sync_enabled / form_sync_name を含む社員行
+     * @return 'ok'|'failed'|'skipped' 転送の結果（skipped=対象外で送信せず）
      */
-    public static function submitForEmployee(array $employee, string $eventType): void
+    public static function submitForEmployee(array $employee, string $eventType): string
     {
         if ((int)($employee['form_sync_enabled'] ?? 0) !== 1 || !self::configured()) {
-            return;
+            return 'skipped';
         }
         $formName = trim((string)($employee['form_sync_name'] ?? ''));
         if ($formName === '') {
             error_log('[form-sync] form_sync_name 未設定のため送信をスキップ: employee_id=' . ($employee['id'] ?? '?'));
-            return;
+            return 'failed';
         }
         $typeLabel = $eventType === 'clock_in' ? '出勤' : ($eventType === 'clock_out' ? '退勤' : '');
         if ($typeLabel === '') {
-            return;
+            return 'skipped';
         }
         try {
             $ok = self::post([
@@ -47,9 +48,11 @@ final class FormSyncService
             if (!$ok) {
                 error_log('[form-sync] 送信失敗: name=' . $formName . ' type=' . $typeLabel);
             }
+            return $ok ? 'ok' : 'failed';
         } catch (\Throwable $e) {
-            // 打刻自体は成立させる。転送の失敗はログのみ。
+            // 打刻自体は成立させる。転送の失敗はフラッシュ＋ログで通知。
             error_log('[form-sync] 例外: ' . $e->getMessage());
+            return 'failed';
         }
     }
 

@@ -7,7 +7,9 @@ CREATE TABLE employees (
   full_name VARCHAR(100) NOT NULL,
   hired_on DATE NULL,
   leave_renewal_month TINYINT UNSIGNED NULL,
+  leave_migration_date DATE NULL,
   form_sync_enabled TINYINT(1) NOT NULL DEFAULT 0,
+  notice_sync_enabled TINYINT(1) NOT NULL DEFAULT 0,
   form_sync_name VARCHAR(100) NULL,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL
@@ -17,6 +19,7 @@ CREATE TABLE users (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   employee_id BIGINT UNSIGNED NOT NULL UNIQUE,
   email VARCHAR(255) NOT NULL UNIQUE,
+  secondary_email VARCHAR(255) NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   role ENUM('employee','admin') NOT NULL DEFAULT 'employee',
   status ENUM('active','disabled','suspended') NOT NULL DEFAULT 'active',

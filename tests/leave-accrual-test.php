@@ -13,13 +13,14 @@ final class Database {
 }
 final class Auth { public static function id(): ?int { return 1; } }
 final class Audit { public static function log(...$args): void {} }
+final class Settings { public static ?string $migration = null; public static function get(string $key, ?string $default = null): ?string { return $key === 'leave_migration_date' ? self::$migration : $default; } }
 require dirname(__DIR__) . '/src/LeaveAccrualService.php';
 
 $pdo = Database::$pdo = new TestPdo('sqlite::memory:');
 $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
 $pdo->sqliteCreateFunction('NOW', static fn() => '2026-09-08 12:00:00');
 $pdo->exec('CREATE TABLE employees (id INTEGER PRIMARY KEY, hired_on TEXT, leave_renewal_month INTEGER)');
-$pdo->exec("INSERT INTO employees VALUES (1,'2024-04-01',4),(2,'2020-04-01',4),(3,NULL,NULL),(4,'2024-04-01',NULL)");
+$pdo->exec("INSERT INTO employees VALUES (1,'2024-04-01',4),(2,'2020-04-01',4),(3,NULL,NULL),(4,'2024-04-01',NULL),(5,'2020-04-01',4)");
 $pdo->exec('CREATE TABLE leave_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, employee_id INTEGER, granted_on TEXT, grant_year INTEGER, days REAL, expires_on TEXT, reason TEXT, source TEXT, created_by INTEGER, created_at TEXT)');
 
 function check(bool $ok, string $label): void {
@@ -44,6 +45,11 @@ check($grants[1]['granted_on'] === '2026-04-01' && $grants[1]['days'] === 11.0, 
 // 入社直後（6か月未満）は付与なし
 check(LeaveAccrualService::eligibleGrants(new \DateTimeImmutable('2026-06-01'), 4, $asOf) === [], '6か月未満は付与なし');
 
+// 移行基準日: 基準日より前の付与は除外。ただし付与回数（日数）は入社日基準を維持する。
+$cut = LeaveAccrualService::eligibleGrants(new \DateTimeImmutable('2020-04-01'), 4, $asOf, new \DateTimeImmutable('2026-01-01'));
+check(count($cut) === 1, '移行基準日以降の付与のみ（2020入社→2026分のみ）');
+check($cut[0]['granted_on'] === '2026-04-01' && $cut[0]['number'] === 6 && $cut[0]['days'] === 18.0, '基準日後でも回数は入社基準（6回目=18日）');
+
 // --- accrueForEmployee: 実付与と冪等性 ---
 $asOfDate = new \DateTimeImmutable('2026-09-08');
 check(LeaveAccrualService::accrueForEmployee(1, $asOfDate) === 2, '社員1に2件付与');
@@ -58,6 +64,13 @@ check($expiry === '2027-03-31', '有効期限は付与日の2年後の前日');
 check(LeaveAccrualService::accrueForEmployee(2, $asOfDate) === 6, '社員2は6件付与');
 $latest = $pdo->query("SELECT days FROM leave_grants WHERE employee_id=2 ORDER BY granted_on DESC LIMIT 1")->fetchColumn();
 check((float)$latest === 18.0, '2026年付与は6回目=18日');
+
+// 全社共通の移行基準日を設定すると、その日以降ぶんのみ自動付与（過去はCSV実残数が正）
+Settings::$migration = '2026-01-01';
+check(LeaveAccrualService::accrueForEmployee(5, $asOfDate) === 1, '移行基準日設定時、社員5は基準日以降の1件のみ付与');
+$e5 = $pdo->query("SELECT granted_on, days FROM leave_grants WHERE employee_id=5")->fetchAll(\PDO::FETCH_ASSOC);
+check(count($e5) === 1 && $e5[0]['granted_on'] === '2026-04-01' && (float)$e5[0]['days'] === 18.0, '社員5の付与は2026-04-01の18日（6回目）のみ');
+Settings::$migration = null;
 
 // 入社日または更新月が未設定なら対象外
 check(LeaveAccrualService::accrueForEmployee(3, $asOfDate) === 0, 'hired_on/更新月なしは対象外');

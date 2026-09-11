@@ -32,9 +32,15 @@ final class LeaveAccrualService
 
     /**
      * asOf 時点までに到来している付与予定を古い順に返す。
+     *
+     * $notBefore（移行基準日）が指定された場合、その日より前の付与は除外する。
+     * ただし付与回数（＝日数テーブルの位置）は入社日を基準に数え続けるため、
+     * 基準日以降の付与でも「4回目=14日」等の正しい日数になる。
+     * 用途: 既存社員の移行で、過去ぶんは実残数（CSV取込）に任せ、基準日以降だけ自動付与する。
+     *
      * @return list<array{granted_on:string, number:int, days:float}>
      */
-    public static function eligibleGrants(DateTimeImmutable $hiredOn, int $renewalMonth, DateTimeImmutable $asOf): array
+    public static function eligibleGrants(DateTimeImmutable $hiredOn, int $renewalMonth, DateTimeImmutable $asOf, ?DateTimeImmutable $notBefore = null): array
     {
         if ($renewalMonth < 1 || $renewalMonth > 12) {
             return [];
@@ -46,13 +52,16 @@ final class LeaveAccrualService
             $candidate = $candidate->modify('+1 year');
         }
         $asOfDay = $asOf->setTime(0, 0);
+        $notBeforeDay = $notBefore?->setTime(0, 0);
         $grants = [];
         for ($number = 1; $candidate <= $asOfDay; $number++) {
-            $grants[] = [
-                'granted_on' => $candidate->format('Y-m-d'),
-                'number' => $number,
-                'days' => self::daysForGrantNumber($number),
-            ];
+            if ($notBeforeDay === null || $candidate >= $notBeforeDay) {
+                $grants[] = [
+                    'granted_on' => $candidate->format('Y-m-d'),
+                    'number' => $number,
+                    'days' => self::daysForGrantNumber($number),
+                ];
+            }
             $candidate = $candidate->modify('+1 year');
         }
         return $grants;
@@ -76,7 +85,14 @@ final class LeaveAccrualService
         if (!$hiredOn || $renewalMonth < 1 || $renewalMonth > 12) {
             return 0;
         }
-        $eligible = self::eligibleGrants($hiredOn, $renewalMonth, $asOf);
+        // 全社共通の有給移行基準日（app_settings）。設定されていれば、その日より前の自動付与は行わない
+        // （過去ぶんはCSV取込した実残数が正。二重付与を防ぐ）。
+        $notBefore = null;
+        $migration = Settings::get('leave_migration_date');
+        if ($migration !== null && $migration !== '') {
+            $notBefore = DateTimeImmutable::createFromFormat('!Y-m-d', $migration) ?: null;
+        }
+        $eligible = self::eligibleGrants($hiredOn, $renewalMonth, $asOf, $notBefore);
         if ($eligible === []) {
             return 0;
         }

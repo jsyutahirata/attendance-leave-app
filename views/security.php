@@ -10,6 +10,17 @@
   <p id="theme-state" class="muted" aria-live="polite"></p>
 </section>
 <section class="panel">
+  <h2>ログイン用メールアドレス</h2>
+  <p class="muted">主メールに加えて、サブのメールアドレスでもログイン・パスワード再設定ができます。</p>
+  <p>主メール：<strong><?= e(\App\Auth::user()['email'] ?? '') ?></strong> <span class="muted">（変更は管理者へ依頼してください）</span></p>
+  <form method="post" action="<?= e(url('security/secondary-email')) ?>" class="inline-form" style="margin-top:10px">
+    <?= \App\Csrf::field() ?>
+    <label>サブメールアドレス<input type="email" name="secondary_email" maxlength="255" value="<?= e(\App\Auth::user()['secondary_email'] ?? '') ?>" placeholder="例：you@personal.example.com"></label>
+    <button class="primary">保存</button>
+  </form>
+  <p class="muted" style="margin-top:6px">空にして保存すると削除します。</p>
+</section>
+<section class="panel">
   <h2>二要素認証（TOTP）</h2>
   <?php if ($enabled): ?>
     <p>状態：<span class="tag success-tag">有効</span></p>
