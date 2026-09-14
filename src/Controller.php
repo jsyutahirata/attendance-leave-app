@@ -393,8 +393,34 @@ final class Controller
         try {
             LeaveService::create((int)Auth::employeeId(), $_POST);
             flash('success', '有給予定を登録しました。');
+            $this->forwardLeaveToNoticeForm((string)($_POST['leave_type'] ?? ''), (string)($_POST['leave_date'] ?? ''), (string)($_POST['note'] ?? ''));
         } catch (DomainException $e) { flash('error', $e->getMessage()); }
         redirect('leave');
+    }
+
+    /** 有給登録を勤怠連絡フォームへ転送する（notice_sync_enabled対象者のみ・ベストエフォート）。 */
+    private function forwardLeaveToNoticeForm(string $leaveType, string $leaveDate, string $note): void
+    {
+        $map = ['full' => 'leave_full', 'am' => 'leave_am', 'pm' => 'leave_pm'];
+        $noticeType = $map[$leaveType] ?? '';
+        if ($noticeType === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $leaveDate)) {
+            return;
+        }
+        try {
+            $stmt = Database::connection()->prepare('SELECT id, notice_sync_enabled, form_sync_name FROM employees WHERE id = ?');
+            $stmt->execute([Auth::employeeId()]);
+            $row = $stmt->fetch();
+            if (!$row) return;
+            $details = trim($note) !== '' ? trim($note) : '有給休暇取得';
+            $status = NoticeFormSyncService::submitForEmployee($row, ['notice_type' => $noticeType, 'target_date' => $leaveDate, 'expected_start' => '', 'expected_end' => '', 'details' => $details]);
+            if ($status === 'failed') {
+                flash('sync-warn', '勤怠連絡フォームへの送信に失敗しました（有給は保存済み）');
+            } elseif ($status === 'ok') {
+                flash('sync-ok', '勤怠連絡フォームへ送信しました');
+            }
+        } catch (\Throwable $e) {
+            error_log('[notice-sync] leave hook failed: ' . $e->getMessage());
+        }
     }
 
     private function leaveCancel(): void
@@ -454,6 +480,7 @@ final class Controller
             if ($kind === 'leave') {
                 LeaveService::create((int)Auth::employeeId(), $input);
                 $message = '有給予定を登録しました。';
+                $this->forwardLeaveToNoticeForm((string)($input['leave_type'] ?? ''), (string)($input['leave_date'] ?? ''), (string)($input['note'] ?? ''));
             } elseif ($kind === 'comp_leave') {
                 $input['note'] = (string)($_POST['comp_note'] ?? '');
                 CompLeaveService::createEntry((int)Auth::employeeId(), $input);
@@ -640,7 +667,7 @@ final class Controller
     {
         Auth::requireAdmin();
         $pdo = Database::connection();
-        $users = $pdo->query('SELECT u.*, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month, e.leave_migration_date , e.form_sync_enabled, e.notice_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id ORDER BY e.full_name')->fetchAll();
+        $users = $pdo->query('SELECT u.*, e.full_name, e.employee_code, e.hired_on, e.leave_renewal_month, e.leave_migration_date , e.form_sync_enabled, e.notice_sync_enabled, e.form_sync_name FROM users u JOIN employees e ON e.id = u.employee_id ORDER BY e.employee_code IS NULL, e.employee_code, e.full_name')->fetchAll();
         $editUser = null;
         $editId = (int)($_GET['edit'] ?? 0);
         if ($editId > 0) {
@@ -923,10 +950,10 @@ final class Controller
         header('Content-Disposition: attachment; filename="leave_balance_import_template.csv"');
         $output = fopen('php://output', 'wb');
         fwrite($output, "\xEF\xBB\xBF");
-        fputcsv($output, ['氏名', '対象年度', '残日数', '付与日', '有効期限', '更新月', '備考'], ',', '"', '\\', "\r\n");
+        fputcsv($output, ['氏名', '対象年度', '残日数', '付与日', '有効期限', '更新月', '入社日', '備考'], ',', '"', '\\', "\r\n");
         $exampleGrantDate = date('Y') . '-04-01';
         $exampleExpiry = (new \DateTimeImmutable($exampleGrantDate))->modify('+2 years -1 day')->format('Y-m-d');
-        fputcsv($output, ['山田 太郎', date('Y'), '10.0', $exampleGrantDate, $exampleExpiry, '4', '運用開始時点の残数'], ',', '"', '\\', "\r\n");
+        fputcsv($output, ['山田 太郎', date('Y'), '10.0', $exampleGrantDate, $exampleExpiry, '4', (date('Y') - 3) . '-04-01', '運用開始時点の残数'], ',', '"', '\\', "\r\n");
         fclose($output);
         exit;
     }

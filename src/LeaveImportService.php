@@ -18,6 +18,7 @@ final class LeaveImportService
         '付与日' => 'granted_on',
         '有効期限' => 'expires_on',
         '更新月' => 'renewal_month',
+        '入社日' => 'hired_on',
         '備考' => 'note',
     ];
 
@@ -190,6 +191,9 @@ final class LeaveImportService
                 : 0.0;
             $usedAfterCurrent = !$calculationErrors ? max(0.0, $usedDays - $currentDaysAtStart) : 0.0;
             $carryoverRemaining = !$calculationErrors ? max(0.0, $previousDays - $usedAfterCurrent) : 0.0;
+            // 入社年・入社月から入社日を YYYY-MM-01 で反映（月別表は日まで持たないため1日固定）。
+            $hiredOn = (!$calculationErrors && $hireYear !== false && $hireMonth !== false)
+                ? sprintf('%04d-%02d-01', (int)$hireYear, (int)$hireMonth) : '';
             foreach ([
                 ['type' => '今年付与分', 'year' => $grantYear, 'days' => $currentRemaining],
                 ['type' => '前年繰越分', 'year' => $grantYear - 1, 'days' => $carryoverRemaining],
@@ -206,6 +210,7 @@ final class LeaveImportService
                     'remaining_days' => $component['days'], 'advance_days' => $isAdvanceComponent ? $advanceDays : 0.0,
                     'granted_on' => $grantedOn, 'expires_on' => $expiresOn,
                     'renewal_month' => $updateMonth === false ? null : (int)$updateMonth,
+                    'hired_on' => $hiredOn,
                     'balance_type' => $component['type'] . ($isAdvanceComponent ? '（前借）' : ''),
                     'note' => '有給使用状況 ' . $candidate['label'] . '時点' . ($isAdvanceComponent ? '（初回付与前の前借）' : ''), 'errors' => $errors,
                     'skip_reason' => !$errors && !$isAdvanceComponent && $component['days'] === 0.0 ? '残数0日のためスキップ' : '',
@@ -234,7 +239,7 @@ final class LeaveImportService
             $columns = $csvRows[$index];
             if (count(array_filter($columns, static fn(string $value): bool => $value !== '')) === 0) continue;
             if (count($rows) >= self::MAX_ROWS) throw new DomainException('CSVは見出しを除いて1000行以下にしてください。');
-            $data = ['employee_name' => '', 'employee_code' => '', 'grant_year' => '', 'days' => '', 'granted_on' => '', 'expires_on' => '', 'renewal_month' => '', 'note' => ''];
+            $data = ['employee_name' => '', 'employee_code' => '', 'grant_year' => '', 'days' => '', 'granted_on' => '', 'expires_on' => '', 'renewal_month' => '', 'hired_on' => '', 'note' => ''];
             foreach ($keys as $column => $key) if ($key !== null) $data[$key] = trim((string)($columns[$column] ?? ''));
             $errors = [];
             if ($data['employee_name'] === '' && $data['employee_code'] === '') $errors[] = '氏名または社員番号が空です';
@@ -253,10 +258,15 @@ final class LeaveImportService
             if (!$errors && $data['expires_on'] > $maximumExpiry) $errors[] = '有効期限は付与日の2年後の前日までです';
             $renewalMonth = $data['renewal_month'] === '' ? null : filter_var($data['renewal_month'], FILTER_VALIDATE_INT);
             if ($renewalMonth !== null && ($renewalMonth === false || $renewalMonth < 1 || $renewalMonth > 12)) $errors[] = '更新月が正しくありません';
+            $hiredOn = '';
+            if ($data['hired_on'] !== '') {
+                $hd = \DateTimeImmutable::createFromFormat('!Y-m-d', $data['hired_on']);
+                if (!$hd || $hd->format('Y-m-d') !== $data['hired_on']) { $errors[] = '入社日はYYYY-MM-DD形式で入力してください'; } else { $hiredOn = $data['hired_on']; }
+            }
             $rows[] = self::finishRow([
                 'line' => $index + 1, 'employee' => $employee, 'source_name' => $data['employee_name'], 'source_code' => $data['employee_code'],
                 'grant_year' => $year === false ? 0 : (int)$year, 'days' => max(0.0, $days), 'granted_on' => $data['granted_on'], 'expires_on' => $data['expires_on'],
-                'renewal_month' => $renewalMonth === false ? null : $renewalMonth, 'balance_type' => '移行残数',
+                'renewal_month' => $renewalMonth === false ? null : $renewalMonth, 'balance_type' => '移行残数', 'hired_on' => $hiredOn,
                 'note' => mb_substr($data['note'], 0, 180), 'errors' => $errors, 'skip_reason' => !$errors && $days === 0.0 ? '残数0日のためスキップ' : '',
             ]);
         }
@@ -273,6 +283,7 @@ final class LeaveImportService
             'expires_on' => (string)$data['expires_on'], 'note' => (string)$data['note'], 'errors' => $data['errors'],
             'renewal_month' => $data['renewal_month'] ?? null, 'balance_type' => (string)($data['balance_type'] ?? '移行残数'),
             'remaining_days' => (float)($data['remaining_days'] ?? $data['days']), 'advance_days' => (float)($data['advance_days'] ?? 0),
+            'hired_on' => (string)($data['hired_on'] ?? ''),
             'duplicate' => false, 'skip_reason' => (string)$data['skip_reason'],
         ];
     }
@@ -303,6 +314,8 @@ final class LeaveImportService
         $insert = $pdo->prepare('INSERT INTO leave_grants (employee_id, granted_on, grant_year, days, expires_on, reason, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())');
         $findEmployee = $pdo->prepare('SELECT id FROM employees WHERE id=? FOR UPDATE');
         $updateRenewalMonth = $pdo->prepare('UPDATE employees SET leave_renewal_month=?, updated_at=NOW() WHERE id=?');
+        // 入社日は未設定（NULL/空）の社員だけ埋める。既存の登録済み入社日は上書きしない。
+        $updateHiredOn = $pdo->prepare("UPDATE employees SET hired_on=?, updated_at=NOW() WHERE id=? AND (hired_on IS NULL OR hired_on='')");
         $findDuplicate = $pdo->prepare('SELECT id FROM leave_grants WHERE employee_id=? AND grant_year=? AND granted_on=? AND days=? AND expires_on=? LIMIT 1');
         $insertAdvance = $pdo->prepare('INSERT INTO leave_adjustments (employee_id, grant_year, days_delta, reason, created_by, created_at) VALUES (?, ?, ?, ?, ?, NOW())');
         $imported = 0; $skipped = 0; $replacedEmployees = 0;
@@ -326,6 +339,7 @@ final class LeaveImportService
                 $employeeId = (int)($row['employee_id'] ?? 0); $findEmployee->execute([$employeeId]);
                 if (!$findEmployee->fetch()) throw new DomainException('取り込み中に対象社員が見つからなくなりました。');
                 if (!empty($row['renewal_month'])) $updateRenewalMonth->execute([(int)$row['renewal_month'], $employeeId]);
+                if (!empty($row['hired_on'])) $updateHiredOn->execute([$row['hired_on'], $employeeId]);
                 if ((string)($row['skip_reason'] ?? '') !== '') { $skipped++; continue; }
                 if (!$replace) {
                     if (!empty($row['duplicate'])) { $skipped++; continue; }
