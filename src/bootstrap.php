@@ -4,7 +4,7 @@ declare(strict_types=1);
 // Composer依存（TOTP: spomky-labs/otphp、QR: bacon/bacon-qr-code、Web Push: minishlink/web-push）を読み込む。
 // XServerでは `composer install` するか、vendor/ ディレクトリをアップロードすること。
 // アプリのバージョン（フッターに表示）。リリースごとに更新する。
-const APP_VERSION = '1.0.1';
+const APP_VERSION = '1.0.2';
 
 $composerAutoload = dirname(__DIR__) . '/vendor/autoload.php';
 if (is_file($composerAutoload)) {

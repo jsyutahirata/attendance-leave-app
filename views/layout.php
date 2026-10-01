@@ -4,7 +4,8 @@ use App\Csrf;
 $user = Auth::user();
 $flashes = $_SESSION['flash'] ?? [];
 unset($_SESSION['flash']);
-$assetVersion = '20260911-03';
+// JS・CSSのキャッシュ更新はバージョンに連動（リリースごとに APP_VERSION を上げる）。
+$assetVersion = APP_VERSION;
 ?>
 <!doctype html>
 <html lang="ja">
