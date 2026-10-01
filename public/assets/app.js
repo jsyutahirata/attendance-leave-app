@@ -275,7 +275,10 @@
   const syncCalendarFormSections = form => {
     const kind = form.elements.entry_kind?.value ?? 'leave';
     form.querySelectorAll('[data-calendar-fields]').forEach(section => {
-      section.classList.toggle('is-hidden', section.dataset.calendarFields !== kind);
+      const hidden = section.dataset.calendarFields !== kind;
+      section.classList.toggle('is-hidden', hidden);
+      // 非表示セクションの必須項目（勤怠連絡の連絡内容など）で送信が無言でブロックされないよう無効化する。
+      section.querySelectorAll('input, select, textarea').forEach(field => { field.disabled = hidden; });
     });
   };
   const calendarEntryDialog = document.getElementById('personal-calendar-dialog');
@@ -316,6 +319,7 @@
         status.textContent = error.message || '予定を登録できませんでした。';
         status.className = 'calendar-form-status flash error';
         status.hidden = false;
+        status.scrollIntoView({block: 'nearest', behavior: 'smooth'});
       } finally {
         submit.disabled = false;
       }
