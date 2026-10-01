@@ -1195,9 +1195,42 @@ final class Controller
     private function adminAudit(): void
     {
         Auth::requireAdmin();
-        // 実行者は個人情報のメールではなく、氏名（アカウント名）で表示する。
-        $logs = Database::connection()->query('SELECT a.*, e.full_name AS actor_name FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_user_id LEFT JOIN employees e ON e.id=u.employee_id ORDER BY a.id DESC LIMIT 500')->fetchAll();
-        render('admin/audit', ['title' => '操作履歴', 'logs' => $logs]);
+        $pdo = Database::connection();
+        // フィルター: 操作者（user_id / 'system'=自動）・操作種別・期間。
+        $actor = (string)($_GET['actor'] ?? '');
+        $target = (string)($_GET['target'] ?? '');
+        $action = trim((string)($_GET['action'] ?? ''));
+        $from = trim((string)($_GET['from'] ?? ''));
+        $to = trim((string)($_GET['to'] ?? ''));
+        $where = []; $params = [];
+        if ($actor === 'system') { $where[] = 'a.actor_user_id IS NULL'; }
+        elseif (ctype_digit($actor)) { $where[] = 'a.actor_user_id = ?'; $params[] = (int)$actor; }
+        // 対象者基準: target_id は付与ID等なので、種別ごとに所属社員へ辿って一致判定する（現存レコードのみ）。
+        if (ctype_digit($target)) {
+            $where[] = "("
+                . "(a.target_type='user' AND a.target_id IN (SELECT id FROM users WHERE employee_id=?))"
+                . " OR (a.target_type='leave_entry' AND a.target_id IN (SELECT id FROM leave_entries WHERE employee_id=?))"
+                . " OR (a.target_type='leave_grant' AND a.target_id IN (SELECT id FROM leave_grants WHERE employee_id=?))"
+                . " OR (a.target_type='leave_adjustment' AND a.target_id IN (SELECT id FROM leave_adjustments WHERE employee_id=?))"
+                . " OR (a.target_type='comp_leave_grant' AND a.target_id IN (SELECT id FROM comp_leave_grants WHERE employee_id=?))"
+                . " OR (a.target_type='comp_leave_entry' AND a.target_id IN (SELECT id FROM comp_leave_entries WHERE employee_id=?))"
+                . " OR (a.target_type='attendance_event' AND a.target_id IN (SELECT id FROM attendance_events WHERE employee_id=?))"
+                . " OR (a.target_type='attendance_notice' AND a.target_id IN (SELECT id FROM attendance_notices WHERE employee_id=?))"
+                . ")";
+            for ($i = 0; $i < 8; $i++) { $params[] = (int)$target; }
+        }
+        if ($action !== '') { $where[] = 'a.action = ?'; $params[] = $action; }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) { $where[] = 'a.created_at >= ?'; $params[] = $from . ' 00:00:00'; }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) { $where[] = 'a.created_at <= ?'; $params[] = $to . ' 23:59:59'; }
+        // 実行者は個人情報のメールではなく、氏名（アカウント名）で表示する。実行者なし＝システム自動。
+        $sql = 'SELECT a.*, e.full_name AS actor_name FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_user_id LEFT JOIN employees e ON e.id=u.employee_id'
+            . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY a.id DESC LIMIT 500';
+        $stmt = $pdo->prepare($sql); $stmt->execute($params);
+        $logs = $stmt->fetchAll();
+        $actorOptions = $pdo->query('SELECT u.id AS user_id, e.id AS employee_id, e.full_name FROM users u JOIN employees e ON e.id=u.employee_id ORDER BY e.full_name')->fetchAll();
+        $actionOptions = $pdo->query('SELECT DISTINCT action FROM audit_logs ORDER BY action')->fetchAll(\PDO::FETCH_COLUMN);
+        render('admin/audit', ['title' => '操作履歴', 'logs' => $logs, 'actorOptions' => $actorOptions, 'actionOptions' => $actionOptions,
+            'filter' => ['actor' => $actor, 'target' => $target, 'action' => $action, 'from' => $from, 'to' => $to]]);
     }
 
     // ---- 閲覧権限（§4.3, §14）----
