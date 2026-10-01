@@ -251,12 +251,14 @@ final class Auth
             return;
         }
 
-        $newValidator = bin2hex(random_bytes(32));
+        // 検証値は使用ごとにローテーションしない（有効期限のみ延長）。ローテーションすると、
+        // アプリ再開時の同時リクエストや通信断で新Cookieが届かなかった端末が旧値で照合に失敗し、
+        // 正規の利用者でもトークンが削除されてログアウトされていたため。
         $days = max(1, (int)config('REMEMBER_LOGIN_DAYS', 30));
         $expiresAt = (new \DateTimeImmutable())->modify('+' . $days . ' days')->format('Y-m-d H:i:s');
-        $pdo->prepare('UPDATE remember_login_tokens SET validator_hash = ?, expires_at = ?, last_used_at = NOW() WHERE id = ?')
-            ->execute([hash('sha256', $newValidator), $expiresAt, $token['id']]);
-        self::setRememberCookie($selector . ':' . $newValidator, time() + ($days * 86400));
+        $pdo->prepare('UPDATE remember_login_tokens SET expires_at = ?, last_used_at = NOW() WHERE id = ?')
+            ->execute([$expiresAt, $token['id']]);
+        self::setRememberCookie($selector . ':' . $validator, time() + ($days * 86400));
         session_regenerate_id(true);
         $_SESSION['user_id'] = (int)$token['user_id'];
         $_SESSION['session_token'] = (string)$token['session_token'];

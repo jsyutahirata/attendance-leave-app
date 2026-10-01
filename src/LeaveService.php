@@ -128,8 +128,11 @@ final class LeaveService
         if (!isset($types[$type]) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
             throw new DomainException('取得日と取得区分を正しく入力してください。');
         }
-        if ($date < date('Y-m-d') && (Auth::user()['role'] ?? 'employee') !== 'admin') {
-            throw new DomainException('過去日の有給は登録できません。管理者へ訂正を依頼してください。');
+        $isAdmin = (Auth::user()['role'] ?? 'employee') === 'admin';
+        // 本人も過去日を事後登録できる。ただし移行基準日より前はCSV取込の実残数に反映済みのため二重消化になるので弾く。
+        $migration = (string)(Settings::get('leave_migration_date') ?? '');
+        if (!$isAdmin && $migration !== '' && $date < $migration) {
+            throw new DomainException(sprintf('%s より前の有給は登録できません。管理者へ訂正を依頼してください。', $migration));
         }
         $days = $types[$type];
         $pdo = Database::connection();
@@ -154,8 +157,9 @@ final class LeaveService
             if ($stmt->fetch()) {
                 throw new DomainException('同じ日付の有給がすでに登録されています。');
             }
-            $isAdmin = (Auth::user()['role'] ?? 'employee') === 'admin';
-            $status = $date < date('Y-m-d') ? 'taken' : (!$isAdmin && Settings::bool('leave_approval_required', true) ? 'pending' : 'registered');
+            // 本人の登録は過去日でも承認制に従う（承認時に過去日なら taken になる）。
+            $needsApproval = !$isAdmin && Settings::bool('leave_approval_required', true);
+            $status = $needsApproval ? 'pending' : ($date < date('Y-m-d') ? 'taken' : 'registered');
             $stmt = $pdo->prepare('INSERT INTO leave_entries (employee_id, leave_date, leave_type, days, status, note, confirmed_with, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())');
             $stmt->execute([$employeeId, $date, $type, $days, $status, trim((string)($input['note'] ?? '')), trim((string)($input['confirmed_with'] ?? '')), $actorId ?? Auth::id()]);
             $id = (int)$pdo->lastInsertId();
@@ -189,7 +193,8 @@ final class LeaveService
             if (in_array($entry['status'], ['cancelled', 'rejected'], true)) {
                 throw new DomainException('この予定は取消済みまたは却下済みです。');
             }
-            if (!$isAdmin && $entry['leave_date'] < date('Y-m-d')) {
+            // 承認待ちなら過去日でも本人が取り消せる（事後登録の誤り訂正用）。
+            if (!$isAdmin && $entry['leave_date'] < date('Y-m-d') && $entry['status'] !== 'pending') {
                 throw new DomainException('過去の有給は管理者だけが訂正できます。');
             }
             $stmt = $pdo->prepare("UPDATE leave_entries SET status = 'cancelled', cancellation_reason = ?, cancelled_by = ?, cancelled_at = NOW(), updated_at = NOW() WHERE id = ?");
