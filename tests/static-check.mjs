@@ -20,6 +20,8 @@ const failures = [];
 for (const file of phpFiles) {
   const text = await readFile(new URL(file, root), 'utf8');
   if (!text.includes('<?php') && !text.includes('<?=')) failures.push(`${file}: missing PHP tag`);
+  // BOMがあると declare(strict_types=1) が致命的エラーになり、出力済み扱いでヘッダー送信も壊れる。
+  if (text.charCodeAt(0) === 0xFEFF) failures.push(`${file}: UTF-8 BOM must not be present`);
   if (text.includes('$_POST[') && !text.includes('Csrf') && !file.includes('Controller.php')) failures.push(`${file}: POST handling outside central CSRF boundary`);
   for (const form of text.matchAll(/<form\s+method="post"[\s\S]*?<\/form>/gi)) {
     if (!form[0].includes('Csrf::field()')) failures.push(`${file}: POST form without CSRF field`);
