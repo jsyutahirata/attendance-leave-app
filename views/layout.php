@@ -89,7 +89,7 @@ $assetVersion = '20260911-03';
   <?php endforeach; ?>
   <?php require $viewFile; ?>
 </main>
-<footer>日時は日本標準時（JST）で表示しています。</footer>
+<footer>日時は日本標準時（JST）で表示しています。<br><span class="app-version">v<?= e(APP_VERSION) ?></span></footer>
 <script>
 document.querySelectorAll('[data-confirm]').forEach(function (el) {
   el.addEventListener('submit', function (event) {

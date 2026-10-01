@@ -124,3 +124,5 @@ html[data-resolved-theme="dark"] .nav-form button{background:transparent;border-
 .work-indicator{display:flex;gap:6px;align-items:center}
 .work-indicator span{width:10px;height:10px;border-radius:50%;background:#c7d2ce}
 .work-indicator[data-state="working"] span{background:#2fb58a}
+
+.app-version{font-size:.75rem;letter-spacing:.02em;opacity:.8}
