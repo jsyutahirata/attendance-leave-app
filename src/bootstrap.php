@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 declare(strict_types=1);
 
 // Composer依存（TOTP: spomky-labs/otphp、QR: bacon/bacon-qr-code、Web Push: minishlink/web-push）を読み込む。
@@ -6,7 +6,7 @@ declare(strict_types=1);
 // アプリのバージョン（フッターに表示）。リリースごとに更新する。
 const APP_VERSION = '1.0.1';
 
-$composerAutoload =dirname(__DIR__) . '/vendor/autoload.php';
+$composerAutoload = dirname(__DIR__) . '/vendor/autoload.php';
 if (is_file($composerAutoload)) {
     require $composerAutoload;
 }
